@@ -924,7 +924,14 @@
 
   async function registerServiceWorker() {
     if (!window.isSecureContext || !('serviceWorker' in navigator)) return null;
-    try { return await navigator.serviceWorker.register('./sw.js'); } catch (_) { return null; }
+    const appScope = new URL('./', document.baseURI);
+    const workerUrl = new URL('sw.js', appScope);
+    try {
+      return await navigator.serviceWorker.register(workerUrl.href, {
+        scope: appScope.pathname,
+        updateViaCache: 'none'
+      });
+    } catch (_) { return null; }
   }
 
   async function enableNotifications() {
