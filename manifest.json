@@ -1,12 +1,19 @@
 {
   "name": "Control de préstamos",
   "short_name": "Préstamos",
-  "description": "Control local de préstamos, cuotas y cobros.",
+  "description": "Control local de préstamos, cuotas, cobros, movimientos y financiaciones de tarjetas.",
   "lang": "es-AR",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f7fb",
   "theme_color": "#f5f7fb",
-  "icons": []
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
 }

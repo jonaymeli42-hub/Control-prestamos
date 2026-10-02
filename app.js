@@ -5,22 +5,24 @@
   const BACKUP_FORMAT = 'control-prestamos-backup';
   const BACKUP_VERSION = 1;
   const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
-  const MOVEMENT_TYPES = ['Aporte propio', 'Préstamo entregado', 'Cobro préstamo', 'Plata recibida', 'Devolución', 'Pago/Otros', 'Tarjeta recibida', 'Tarjeta pagada'];
   const INITIAL_DATA = {
     app: BACKUP_FORMAT,
     version: BACKUP_VERSION,
-    loans: [], installments: [], collections: [], movements: [],
+    loans: [], installments: [], collections: [], movements: [], cardFinancings: [], cardPayments: [],
     people: ['Harry', 'Semanal', 'Marcelo', 'Jano', '12 Brasas'],
     groups: ['H', 'S', 'M', 'J', '12B'],
     loanTypes: [...LOAN_TYPES],
     cards: ['Visa', 'Mastercard', 'Naranja', 'American Express', 'Otra'],
-    settings: { currency: 'ARS', locale: 'es-AR', initialBalance: 0 }
+    settings: { currency: 'ARS', locale: 'es-AR', initialBalance: 0, notificationsEnabled: false, notificationTime: '09:00', lastNotificationDate: '' }
   };
 
   let data = loadData();
-  let page = 'home';
-  let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const startupParams = new URLSearchParams(window.location.search);
+  let page = ['home', 'loans', 'collections', 'calendar', 'movements', 'cards', 'more'].includes(startupParams.get('page')) ? startupParams.get('page') : 'home';
+  let calendarSelectedDate = parseDate(startupParams.get('date')) ? dateKey(startupParams.get('date')) : todayKey();
+  let calendarMonth = new Date((parseDate(calendarSelectedDate) || new Date()).getFullYear(), (parseDate(calendarSelectedDate) || new Date()).getMonth(), 1);
   let loanFilter = 'Todos';
+  let movementFilter = 'Todos';
   let toastTimer;
 
   const app = document.querySelector('#app');
@@ -39,10 +41,13 @@
   function normalizeData(value) {
     if (!value || typeof value !== 'object') return structuredClone(INITIAL_DATA);
     const result = { ...structuredClone(INITIAL_DATA), ...value };
-    for (const key of ['loans', 'installments', 'collections', 'movements', 'people', 'groups', 'loanTypes', 'cards']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'people', 'groups', 'loanTypes', 'cards']) {
       if (!Array.isArray(result[key])) result[key] = [...INITIAL_DATA[key]];
     }
     result.settings = { ...INITIAL_DATA.settings, ...(value.settings || {}) };
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(result.settings.notificationTime)) result.settings.notificationTime = INITIAL_DATA.settings.notificationTime;
+    result.loans = result.loans.map(loan => ({ ...loan, disbursed: loan.disbursed !== false }));
+    result.cardFinancings = result.cardFinancings.map(financing => ({ ...financing, paid: Number(financing.paid) || 0, received: financing.received !== false }));
     result.app = BACKUP_FORMAT;
     result.version = BACKUP_VERSION;
     return result;
@@ -110,16 +115,42 @@
   }
 
   function dueLeft(item) { return Math.max(0, item.amount - item.paid); }
-  function pendingInstallments() { return data.installments.filter(item => dueLeft(item) > 0.005); }
-  function movementBalance() {
-    return data.movements.reduce((total, item) => {
-      const isUnpaidFutureExpense = item.direction === 'out' && item.status === 'Pendiente' && item.dueDate;
-      return total + (isUnpaidFutureExpense ? 0 : item.direction === 'in' ? item.amount : -item.amount);
-    }, Number(data.settings.initialBalance) || 0);
+  function pendingInstallments() {
+    return data.installments.filter(item => {
+      const loan = data.loans.find(record => record.id === item.loanId);
+      return dueLeft(item) > 0.005 && (!loan || loan.disbursed !== false);
+    });
   }
-  function upcomingPayables() {
-    return data.movements.filter(item => item.direction === 'out' && item.status !== 'Pagado' && item.dueDate)
-      .reduce((sum, item) => sum + Number(item.balance ?? item.amount), 0);
+  function movementBalance() {
+    return roundMoney(data.movements.reduce((total, item) => {
+      if (item.status === 'Pendiente' || item.status === 'Programado') return total;
+      return total + (item.direction === 'in' ? item.amount : -item.amount);
+    }, Number(data.settings.initialBalance) || 0));
+  }
+  function financingBalance(financing) {
+    return roundMoney(Math.max(0, Number(financing.totalToRepay || 0) - Number(financing.paid || 0)));
+  }
+  function cardDebtTotal() {
+    return roundMoney(data.cardFinancings.filter(item => item.received !== false).reduce((sum, item) => sum + financingBalance(item), 0));
+  }
+  function receivableTotal() {
+    return roundMoney(pendingInstallments().reduce((sum, item) => sum + dueLeft(item), 0));
+  }
+  function futureMoney() {
+    return roundMoney(receivableTotal() - cardDebtTotal());
+  }
+  function movementCategory(item) {
+    if (item.type === 'Cobro préstamo') return 'cobros';
+    if (item.type === 'Préstamo dado' || item.type === 'Préstamo entregado') return 'loans-out';
+    if (['Ingreso general', 'Aporte propio', 'Plata recibida'].includes(item.type)) return 'income';
+    if (['Gasto general', 'Devolución', 'Pago/Otros'].includes(item.type)) return 'expenses';
+    return 'cards';
+  }
+  function displayMovementType(item) {
+    return item.type === 'Préstamo entregado' ? 'Préstamo dado' : item.type;
+  }
+  function movementDisplayDate(item) {
+    return ['Pendiente', 'Programado'].includes(item.status) ? item.scheduledDate || item.dueDate || item.date : item.date;
   }
 
   function badge(status, dueDate) {
@@ -138,24 +169,24 @@
 
   function render() {
     document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, more: renderMore };
+    const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, cards: renderCards, more: renderMore };
     app.innerHTML = (views[page] || renderHome)();
   }
 
   function renderHome() {
     const allPending = pendingInstallments().sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     const receivable = allPending.reduce((sum, item) => sum + dueLeft(item), 0);
-    const payable = upcomingPayables();
+    const payable = cardDebtTotal();
     const current = movementBalance();
-    const future = current + receivable - payable;
+    const future = futureMoney();
     const next = allPending.filter(item => item.dueDate >= todayKey()).slice(0, 3);
     const recentLoans = data.loans.filter(loan => loanTotals(loan).status !== 'Pagado').slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
-        <article class="summary-card future"><span class="label">Dinero futuro</span><span class="amount">${money(future)}</span><span class="hint">Actual + cobros − pagos previstos</span></article>
+        <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Préstamos pendientes − deuda de tarjetas</span></article>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
-        <article class="summary-card payable"><span class="label">A pagar</span><span class="amount">${money(payable)}</span><span class="hint">Pagos pendientes con vencimiento</span></article>
+        <article class="summary-card payable"><span class="label">A pagar de tarjetas</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
       <button class="primary-button full add-loan" data-action="new-loan"><span>＋</span>Agregar nuevo préstamo</button>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
@@ -195,6 +226,41 @@
       ${pending.length ? `<div class="list">${pending.map(item => renderInstallmentCard(item)).join('')}</div>` : emptyState('✓', 'Todo al día', 'No quedan cuotas pendientes de cobro.')}`;
   }
 
+  function calendarEvents() {
+    const events = [];
+    pendingInstallments().forEach(item => {
+      const loan = data.loans.find(record => record.id === item.loanId);
+      if (loan) events.push({ id: item.id, kind: 'installment', date: item.dueDate, amount: dueLeft(item), label: `Cobro de cuota ${item.number}`, detail: `${loan.person} · ${loan.code}` });
+    });
+    data.movements.filter(item => item.status === 'Pendiente' || item.status === 'Programado').forEach(item => {
+      const date = item.scheduledDate || item.dueDate;
+      if (!date) return;
+      events.push({ id: item.id, kind: 'movement', date, amount: item.amount, label: displayMovementType(item), detail: item.person || item.description || (item.direction === 'in' ? 'Ingreso general' : 'Gasto general') });
+    });
+    data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005 && item.nextPaymentDate).forEach(item => {
+      events.push({ id: item.id, kind: 'card-payment', date: item.nextPaymentDate, amount: financingBalance(item), label: 'Pago de tarjeta', detail: `${item.card} · saldo pendiente` });
+    });
+    return events.filter(event => parseDate(event.date)).sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
+  }
+
+  function renderCalendarEvent(event) {
+    return `<article class="card installment-card" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" tabindex="0" role="button"><div class="row-top"><div><div class="person">${escapeHtml(event.label)}</div><div class="subtle">${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })}</div></div><div class="amount">${money(event.amount)}</div></div><div class="row" style="margin-top:9px"><span class="badge pending">Pendiente</span><span class="subtle">Ver detalle ›</span></div></article>`;
+  }
+
+  function openCalendarEvent(kind, eventId) {
+    if (kind === 'installment') {
+      const item = data.installments.find(record => record.id === eventId);
+      const loan = item && data.loans.find(record => record.id === item.loanId);
+      if (!item || !loan || dueLeft(item) <= 0.005) return;
+      openModal('Cobro de cuota', `${loan.person} · ${loan.code}`, `<div class="card kv-list"><div class="kv"><span>Vencimiento</span><b>${formatDate(item.dueDate, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Cuota</span><b>${item.number}</b></div><div class="kv"><span>Saldo</span><b>${money(dueLeft(item))}</b></div></div><button class="primary-button full" style="margin-top:14px" data-action="calendar-collect" data-id="${escapeHtml(item.id)}">Marcar cobrado</button>`);
+    } else if (kind === 'movement') openMovementDetail(eventId);
+    else if (kind === 'card-payment') {
+      const financing = data.cardFinancings.find(record => record.id === eventId);
+      if (!financing) return;
+      openModal('Pago de tarjeta', financing.card, `<div class="card kv-list"><div class="kv"><span>Fecha prevista</span><b>${formatDate(financing.nextPaymentDate)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><button class="primary-button full" style="margin-top:14px" data-action="calendar-pay-card" data-id="${escapeHtml(financing.id)}">Marcar pagado</button>`);
+    }
+  }
+
   function renderCalendar() {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
@@ -202,48 +268,134 @@
     const offset = (first.getDay() + 6) % 7;
     const days = new Date(year, month + 1, 0).getDate();
     const slots = Math.ceil((offset + days) / 7) * 7;
-    const itemsByDate = new Map();
-    data.installments.forEach(item => {
-      const key = item.dueDate;
-      if (!itemsByDate.has(key)) itemsByDate.set(key, []);
-      itemsByDate.get(key).push(item);
+    const events = calendarEvents();
+    const eventsByDate = new Map();
+    events.forEach(event => {
+      if (!eventsByDate.has(event.date)) eventsByDate.set(event.date, []);
+      eventsByDate.get(event.date).push(event);
     });
     const cells = Array.from({ length: slots }, (_, index) => {
-      const dayNumber = index - offset + 1;
-      const date = new Date(year, month, dayNumber);
+      const date = new Date(year, month, index - offset + 1);
       const key = dateKey(date);
       const inMonth = date.getMonth() === month;
-      const due = (itemsByDate.get(key) || []).filter(item => dueLeft(item) > 0.005);
-      const paid = (itemsByDate.get(key) || []).length > 0 && due.length === 0;
-      const classes = ['calendar-day', !inMonth ? 'other' : '', key === todayKey() ? 'today' : '', due.length ? `has-due ${key < todayKey() ? 'overdue-dot' : ''}` : paid ? 'has-due paid-dot' : ''].filter(Boolean).join(' ');
-      return `<button class="${classes}" data-action="calendar-day" data-date="${key}" ${!inMonth ? 'disabled' : ''}>${date.getDate()}${due.length > 1 ? `<span class="sr-only">${due.length} cuotas</span>` : ''}</button>`;
+      const count = (eventsByDate.get(key) || []).length;
+      const classes = ['calendar-day', !inMonth ? 'other' : '', key === todayKey() ? 'today' : '', key === calendarSelectedDate ? 'selected' : '', count ? `has-due ${key < todayKey() ? 'overdue-dot' : ''}` : ''].filter(Boolean).join(' ');
+      return `<button class="${classes}" data-action="calendar-day" data-date="${key}" ${!inMonth ? 'disabled' : ''}>${date.getDate()}${count > 1 ? `<span class="calendar-count">${count}</span>` : ''}</button>`;
     }).join('');
-    return `${pageHeading('Calendario', 'Vencimientos de tus cuotas.')}
+    const selectedEvents = events.filter(event => event.date === calendarSelectedDate);
+    return `${pageHeading('Calendario', 'Eventos vinculados a préstamos, tarjetas y movimientos.', `<span class="date-pill">HOY · ${formatDate(todayKey(), { day: 'numeric', month: 'short' })}</span>`)}
       <section class="calendar"><div class="calendar-head"><button aria-label="Mes anterior" data-action="month-prev">‹</button><strong>${new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(calendarMonth)}</strong><button aria-label="Mes siguiente" data-action="month-next">›</button></div>
       <div class="calendar-grid">${['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(day => `<div class="weekday">${day}</div>`).join('')}${cells}</div>
-      <div class="calendar-legend"><span class="legend-item"><i class="dot"></i>Pendiente</span><span class="legend-item"><i class="dot paid"></i>Pagada</span><span class="legend-item"><i class="dot today"></i>Hoy</span></div></section>
-      <section id="calendar-day-list" class="section"><div class="section-head"><h3>Cuotas del mes</h3></div>${monthItems(year, month)}</section>`;
-  }
-
-  function monthItems(year, month) {
-    const items = data.installments.filter(item => {
-      const date = parseDate(item.dueDate);
-      return date && date.getFullYear() === year && date.getMonth() === month;
-    }).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    return items.length ? `<div class="list">${items.map(item => renderInstallmentCard(item)).join('')}</div>` : emptyState('▦', 'Sin vencimientos este mes', 'Cuando haya cuotas con vencimiento en este mes, aparecerán acá.');
+      <div class="calendar-legend"><span class="legend-item"><i class="dot"></i>Evento pendiente</span><span class="legend-item"><i class="dot today"></i>Hoy</span></div></section>
+      <section class="section"><div class="section-head"><h3>Eventos del ${calendarSelectedDate === todayKey() ? 'día de hoy' : formatDate(calendarSelectedDate, { day: 'numeric', month: 'long' })}</h3></div>${selectedEvents.length ? `<div class="list">${selectedEvents.map(renderCalendarEvent).join('')}</div>` : emptyState('▦', 'Sin eventos para este día', 'Las cuotas, pagos e ingresos programados aparecerán acá.')}</section>`;
   }
 
   function renderMovements() {
-    const items = [...data.movements].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const items = [...data.movements].filter(item => movementFilter === 'Todos' || movementCategory(item) === movementFilter).sort((a, b) => movementDisplayDate(b).localeCompare(movementDisplayDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
     const directionLabel = direction => direction === 'in' ? 'Entrada' : 'Salida';
-    return `${pageHeading('Movimientos', `${items.length} registros`, '<button class="primary-button" data-action="new-movement">＋ Registrar</button>')}
-      ${items.length ? `<div class="list">${items.map(item => `<article class="card movement-card" data-action="movement-detail" data-id="${escapeHtml(item.id)}"><div class="row-top"><div><div class="person">${escapeHtml(item.type)}</div><div class="subtle">${formatDate(item.date, { day: 'numeric', month: 'short', year: 'numeric' })}${item.person ? ` · ${escapeHtml(item.person)}` : ''}</div></div><div class="amount ${item.direction === 'in' ? 'movement-in' : 'movement-out'}">${item.direction === 'in' ? '+' : '−'}${money(item.amount)}</div></div><div class="inline-details"><span>${directionLabel(item.direction)}</span>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}</div></article>`).join('')}</div>` : emptyState('↔', 'Todavía no hay movimientos', 'Los préstamos y cobros se anotan automáticamente. También podés registrar otros movimientos.', '<button class="primary-button" data-action="new-movement">Registrar movimiento</button>')}`;
+    const filters = [['Todos', 'Todos'], ['Cobros', 'cobros'], ['Préstamos dados', 'loans-out'], ['Ingresos generales', 'income'], ['Gastos generales', 'expenses']];
+    return `${pageHeading('Movimientos', `${data.movements.length} registros`, '<button class="primary-button" data-action="new-movement">＋ Registrar</button>')}
+      <div class="filter-row">${filters.map(([label, value]) => `<button class="filter-chip ${movementFilter === value ? 'active' : ''}" data-action="movement-filter" data-value="${value}">${label}</button>`).join('')}</div>
+      ${items.length ? `<div class="list">${items.map(item => `<article class="card movement-card" data-action="movement-detail" data-id="${escapeHtml(item.id)}"><div class="row-top"><div><div class="person">${escapeHtml(displayMovementType(item))}</div><div class="subtle">${formatDate(movementDisplayDate(item), { day: 'numeric', month: 'short', year: 'numeric' })}${item.person ? ` · ${escapeHtml(item.person)}` : ''}</div></div><div class="amount ${item.direction === 'in' ? 'movement-in' : 'movement-out'}">${item.direction === 'in' ? '+' : '−'}${money(item.amount)}</div></div><div class="inline-details"><span>${directionLabel(item.direction)}</span>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${item.status === 'Pendiente' ? '<span class="badge pending">Programado</span>' : ''}</div></article>`).join('')}</div>` : emptyState('↔', 'Sin movimientos en esta categoría', 'Los movimientos de préstamos y los ingresos o gastos registrados aparecerán acá.', '<button class="primary-button" data-action="new-movement">Registrar movimiento</button>')}`;
+  }
+
+  function renderCards() {
+    const received = data.cardFinancings.filter(item => item.received !== false);
+    const totals = {
+      received: received.reduce((sum, item) => sum + Number(item.receivedAmount || 0), 0),
+      repay: received.reduce((sum, item) => sum + Number(item.totalToRepay || 0), 0),
+      paid: received.reduce((sum, item) => sum + Number(item.paid || 0), 0),
+      balance: cardDebtTotal()
+    };
+    const records = [...data.cardFinancings].sort((a, b) => (b.receivedDate || '').localeCompare(a.receivedDate || ''));
+    return `${pageHeading('Tarjetas', `${records.length} financiaciones`, '<button class="primary-button" data-action="new-financing">＋ Nueva</button>')}
+      <section class="summary-grid card-summary-grid"><article class="summary-card current"><span class="label">Total recibido</span><span class="amount">${money(totals.received)}</span></article><article class="summary-card future"><span class="label">Total a devolver</span><span class="amount">${money(totals.repay)}</span></article><article class="summary-card receivable"><span class="label">Total pagado</span><span class="amount">${money(totals.paid)}</span></article><article class="summary-card payable"><span class="label">Total pendiente</span><span class="amount">${money(totals.balance)}</span></article></section>
+      <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones de tarjeta', 'Registrá el dinero recibido y sus cargos para seguir el saldo.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section>`;
+  }
+
+  function renderFinancingCard(financing) {
+    const balance = financingBalance(financing);
+    const status = financing.received === false ? 'Programada' : balance <= 0.005 ? 'Pagada' : financing.paid > 0 ? 'Parcial' : 'Pendiente';
+    const badgeClass = status === 'Pagada' ? 'paid' : status === 'Parcial' ? 'partial' : 'pending';
+    return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
+  }
+
+  function openFinancingForm() {
+    const cardOptions = data.cards.length ? data.cards : ['Otra'];
+    const body = `<form id="financing-form"><div class="form-grid"><div class="field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}">${escapeHtml(card)}</option>`).join('')}</select></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${todayKey()}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="number" min="0.01" step="0.01" inputmode="decimal" required></div><div class="field"><label for="financing-charges">Intereses / cargos</label><input id="financing-charges" name="charges" type="number" min="0" step="0.01" value="0" inputmode="decimal" required></div><div class="field full-span"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" min="${todayKey()}"></div></div><p class="field-help">El dinero recibido actualiza el saldo disponible. Los cargos se suman a la deuda, no al dinero recibido.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar financiación</button></div></form>`;
+    openModal('Nueva financiación', 'Registrá cuánto recibiste y cuánto debés devolver.', body);
+    modalRoot.querySelector('#financing-form').addEventListener('submit', saveFinancing);
+  }
+
+  function saveFinancing(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const receivedAmount = roundMoney(Number(values.get('receivedAmount')));
+    const charges = roundMoney(Number(values.get('charges')));
+    const receivedDate = String(values.get('receivedDate'));
+    const nextPaymentDate = String(values.get('nextPaymentDate'));
+    if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(charges) || charges < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto y las fechas de la financiación.'); return; }
+    const financing = { id: id(), card: String(values.get('card')), receivedDate, receivedAmount, charges, totalToRepay: roundMoney(receivedAmount + charges), paid: 0, nextPaymentDate, received: receivedDate <= todayKey(), createdAt: new Date().toISOString(), payments: [] };
+    data.cardFinancings.unshift(financing);
+    const movement = { id: id(), date: receivedDate, scheduledDate: financing.received ? '' : receivedDate, createdAt: new Date().toISOString(), type: 'Tarjeta recibida', description: `${financing.card} · Financiación recibida`, direction: 'in', amount: receivedAmount, cardFinancingId: financing.id, status: financing.received ? 'Realizado' : 'Pendiente' };
+    financing.receivedMovementId = movement.id;
+    data.movements.unshift(movement);
+    persist(); closeModal(); page = 'cards'; render(); showToast(financing.received ? 'Financiación registrada y dinero sumado.' : 'Financiación programada para una fecha futura.');
+  }
+
+  function openFinancingDetail(financingId) {
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    if (!financing) return;
+    const payments = data.cardPayments.filter(item => item.financingId === financing.id).sort((a, b) => b.date.localeCompare(a.date));
+    const history = payments.length ? `<div class="list">${payments.map(payment => `<div class="card"><div class="row"><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })}</b><strong>${money(payment.amount)}</strong></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}</div>`).join('')}</div>` : '<p class="subtle">Todavía no hay pagos.</p>';
+    const controls = financing.received !== false && financingBalance(financing) > 0.005 ? `<div class="form-actions"><button class="secondary-button" data-action="schedule-card-payment" data-id="${escapeHtml(financing.id)}">Programar fecha</button><button class="primary-button" data-action="pay-card" data-id="${escapeHtml(financing.id)}">Registrar pago</button></div>` : '';
+    openModal(financing.card, 'Detalle de financiación', `<div class="card kv-list"><div class="kv"><span>Fecha recibida</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div>${controls}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
+  }
+
+  function openCardPaymentForm(financingId) {
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    if (!financing || financing.received === false || financingBalance(financing) <= 0.005) return;
+    const balance = financingBalance(financing);
+    const body = `<form id="card-payment-form"><div class="alert">${escapeHtml(financing.card)} · Saldo pendiente ${money(balance)}. Podés pagar cualquier monto hasta ese saldo.</div><div class="form-grid"><div class="field"><label for="card-payment-amount">Monto pagado</label><input id="card-payment-amount" name="amount" type="number" min="0.01" max="${balance}" step="0.01" value="${balance}" required></div><div class="field"><label for="card-payment-date">Fecha de pago</label><input id="card-payment-date" name="date" type="date" value="${todayKey()}" max="${todayKey()}" required></div><div class="field full-span"><label for="card-payment-note">Descripción (opcional)</label><input id="card-payment-note" name="note" maxlength="300"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Registrar pago</button></div></form>`;
+    openModal('Registrar pago de tarjeta', financing.card, body);
+    modalRoot.querySelector('#card-payment-form').addEventListener('submit', event => saveCardPayment(event, financing.id));
+  }
+
+  function saveCardPayment(event, financingId) {
+    event.preventDefault();
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    const values = new FormData(event.currentTarget);
+    const amount = roundMoney(Number(values.get('amount')));
+    const date = String(values.get('date'));
+    if (!financing || !Number.isFinite(amount) || amount <= 0 || amount > financingBalance(financing) + 0.005 || !parseDate(date) || date > todayKey()) { showToast('El pago debe ser válido y no superar el saldo pendiente.'); return; }
+    const payment = { id: id(), financingId, card: financing.card, amount, date, note: String(values.get('note')).trim(), createdAt: new Date().toISOString() };
+    financing.paid = roundMoney(financing.paid + amount);
+    financing.payments ||= [];
+    financing.payments.push(payment.id);
+    financing.nextPaymentDate = '';
+    data.cardPayments.unshift(payment);
+    data.movements.unshift({ id: id(), date, createdAt: payment.createdAt, type: 'Tarjeta pagada', description: `${financing.card} · Pago de financiación`, direction: 'out', amount, cardFinancingId: financing.id, cardPaymentId: payment.id, status: 'Realizado' });
+    persist(); closeModal(); render(); showToast('Pago registrado; se actualizó el saldo pendiente.');
+  }
+
+  function openCardScheduleForm(financingId) {
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    if (!financing || financingBalance(financing) <= 0.005) return;
+    const body = `<form id="card-schedule-form"><div class="field"><label for="schedule-date">Próxima fecha prevista de pago</label><input id="schedule-date" name="date" type="date" min="${todayKey()}" value="${financing.nextPaymentDate || todayKey()}" required></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar fecha</button></div></form>`;
+    openModal('Programar pago', financing.card, body);
+    modalRoot.querySelector('#card-schedule-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const date = String(new FormData(event.currentTarget).get('date'));
+      if (!parseDate(date) || date < todayKey()) { showToast('Elegí hoy o una fecha futura.'); return; }
+      financing.nextPaymentDate = date; persist(); closeModal(); render(); showToast('Fecha de pago programada.');
+    });
   }
 
   function renderMore() {
-    return `${pageHeading('Más', 'Configuración y respaldo de tus datos.')}
-      <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un archivo JSON con todos tus préstamos, cuotas, cobros, movimientos y listas.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
+    return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
+      <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones y pagos de tarjetas, configuración y avisos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section>
+      <section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section>
       <section class="section"><div class="section-head"><h3>Configuración</h3></div>
         ${renderSettingGroup('Personas', 'people', data.people)}${renderSettingGroup('Grupos', 'groups', data.groups)}${renderSettingGroup('Tipos de préstamo', 'loanTypes', data.loanTypes)}${renderSettingGroup('Tarjetas', 'cards', data.cards)}
       </section><p class="subtle" style="text-align:center;margin-top:24px">Los datos se guardan en este dispositivo. Exportá un respaldo con regularidad.</p>`;
@@ -274,6 +426,7 @@
       <div class="field"><label for="loan-capital">Capital prestado</label><input id="loan-capital" name="capital" type="number" min="0.01" step="0.01" inputmode="decimal" required placeholder="0,00"></div>
       <div class="field"><label for="loan-rate">Tasa (%)</label><input id="loan-rate" name="rate" type="number" min="0" step="0.01" inputmode="decimal" value="0" required></div>
       <div class="field"><label for="loan-count">Cantidad de cuotas</label><input id="loan-count" name="count" type="number" min="1" max="240" step="1" value="1" required></div>
+      <div class="field"><label for="loan-delivery-date">Fecha de entrega</label><input id="loan-delivery-date" name="deliveryDate" type="date" value="${today}" required><span class="field-help">Una fecha futura deja el préstamo programado.</span></div>
       <div class="field"><label for="loan-first-due">Primer vencimiento</label><input id="loan-first-due" name="firstDue" type="date" value="${today}" required></div>
       <div class="field full-span"><label for="loan-notes">Notas</label><textarea id="loan-notes" name="notes" maxlength="1000" placeholder="Detalle opcional"></textarea></div>
       </div><p class="field-help">La tasa se aplica una sola vez al total para cuotas normales y semanales. En interés mensual, se aplica por mes.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar préstamo</button></div></form>`;
@@ -311,7 +464,8 @@
     const count = Number(form.get('count'));
     const mode = String(form.get('mode'));
     const firstDue = String(form.get('firstDue'));
-    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue)) {
+    const deliveryDate = String(form.get('deliveryDate') || todayKey());
+    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate)) {
       showToast('Revisá capital, tasa, cuotas y vencimiento.'); return;
     }
     const person = String(form.get('person')).trim();
@@ -319,12 +473,13 @@
       id: id(), code: String(form.get('code')).trim() || `PRE-${String(data.loans.length + 1).padStart(3, '0')}`,
       person, group: String(form.get('group')), mode, capital: roundMoney(capital), rate,
       count: mode === '1 cuota' ? 1 : count, firstDue,
-      notes: String(form.get('notes')).trim(), createdAt: new Date().toISOString()
+      notes: String(form.get('notes')).trim(), createdAt: new Date().toISOString(), deliveryDate,
+      disbursed: deliveryDate <= todayKey()
     };
     const schedule = calculateSchedule({ capital: loan.capital, rate, count: loan.count, mode, firstDue }).map(item => ({ ...item, loanId: loan.id }));
     data.loans.unshift(loan);
     data.installments.push(...schedule);
-    data.movements.unshift({ id: id(), date: todayKey(), createdAt: new Date().toISOString(), type: 'Préstamo entregado', person, description: `${loan.code} · ${loan.mode}`, direction: 'out', amount: loan.capital, loanId: loan.id });
+    data.movements.unshift({ id: id(), date: deliveryDate, scheduledDate: loan.disbursed ? '' : deliveryDate, createdAt: new Date().toISOString(), type: 'Préstamo dado', person, description: `${loan.code} · ${loan.mode}`, direction: 'out', amount: loan.capital, loanId: loan.id, status: loan.disbursed ? 'Realizado' : 'Pendiente' });
     persist(); closeModal(); page = 'loans'; render(); showToast('Préstamo y cuotas creados.');
   }
 
@@ -332,7 +487,7 @@
     const loan = data.loans.find(item => item.id === loanId);
     if (!loan) return;
     const totals = loanTotals(loan);
-    const installments = totals.installments.map(item => `<div class="installment-line"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong>Pagado ${money(item.paid)} de ${money(item.amount)}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${dueLeft(item) > 0.005 ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : '<span class="badge paid">Pagada</span>'}</div></div>`).join('');
+    const installments = totals.installments.map(item => `<div class="installment-line"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong>Pagado ${money(item.paid)} de ${money(item.amount)}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${dueLeft(item) > 0.005 && loan.disbursed !== false ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : loan.disbursed === false ? '<span class="badge pending">Sin entregar</span>' : '<span class="badge paid">Pagada</span>'}</div></div>`).join('');
     openModal(`Préstamo ${loan.code}`, loan.person, `<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div>${loan.notes ? `<div class="kv"><span>Notas</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}</div><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>`);
   }
 
@@ -341,7 +496,7 @@
     if (!item) return;
     const loan = data.loans.find(row => row.id === item.loanId);
     const left = dueLeft(item);
-    if (!loan || left <= 0.005) return;
+    if (!loan || loan.disbursed === false || left <= 0.005) return;
     const body = `<form id="payment-form"><div class="alert">${escapeHtml(loan.person)} · Cuota ${item.number}. Saldo pendiente: <b>${money(left)}</b>.</div><div class="form-grid"><div class="field"><label for="payment-amount">Importe cobrado</label><input id="payment-amount" name="amount" type="number" min="0.01" max="${left}" step="0.01" value="${left}" inputmode="decimal" required></div><div class="field"><label for="payment-date">Fecha</label><input id="payment-date" name="date" type="date" value="${todayKey()}" required></div><div class="field full-span"><label for="payment-note">Observación</label><input id="payment-note" name="note" maxlength="500" placeholder="Opcional"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar cobro</button></div></form>`;
     openModal('Registrar cobro', `Cuota ${item.number} · ${loan.code}`, body);
     modalRoot.querySelector('#payment-form').addEventListener('submit', event => savePayment(event, item.id));
@@ -354,7 +509,7 @@
     const date = String(form.get('date'));
     const item = data.installments.find(row => row.id === installmentId);
     const loan = item && data.loans.find(row => row.id === item.loanId);
-    if (!item || !loan || !Number.isFinite(amount) || amount <= 0 || amount > dueLeft(item) + 0.005 || !parseDate(date)) {
+    if (!item || !loan || loan.disbursed === false || !Number.isFinite(amount) || amount <= 0 || amount > dueLeft(item) + 0.005 || !parseDate(date)) {
       showToast('El importe debe ser mayor a cero y no superar el saldo.'); return;
     }
     const payment = { id: id(), installmentId, loanId: loan.id, amount, date, note: String(form.get('note')).trim(), createdAt: new Date().toISOString() };
@@ -369,34 +524,45 @@
   }
 
   function openMovementForm() {
-    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type">${MOVEMENT_TYPES.filter(type => type !== 'Préstamo entregado' && type !== 'Cobro préstamo').map(type => `<option>${escapeHtml(type)}</option>`).join('')}</select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${todayKey()}" required></div><div class="field"><label for="movement-direction">Movimiento</label><select id="movement-direction" name="direction"><option value="in">Entrada</option><option value="out">Salida</option></select></div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" required></div><div class="field"><label for="movement-person">Persona</label><input id="movement-person" name="person" list="movement-people"><datalist id="movement-people">${data.people.map(person => `<option value="${escapeHtml(person)}">`).join('')}</datalist></div><div class="field"><label for="movement-due">Vencimiento (si aplica)</label><input id="movement-due" name="dueDate" type="date"></div><div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Detalle opcional"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar movimiento</button></div></form>`;
-    openModal('Registrar movimiento', 'Este registro actualiza el resumen de dinero.', body);
+    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type"><option>Ingreso general</option><option>Gasto general</option></select></div><div class="field"><label for="movement-date">Fecha de realización</label><input id="movement-date" name="date" type="date" value="${todayKey()}" required><span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span></div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="number" min="0.01" step="0.01" inputmode="decimal" required></div><div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar movimiento</button></div></form>`;
+    openModal('Ingreso o gasto general', 'Los movimientos generales no se asocian a préstamos.', body);
     modalRoot.querySelector('#movement-form').addEventListener('submit', event => {
       event.preventDefault();
       const values = new FormData(event.currentTarget);
       const amount = roundMoney(Number(values.get('amount')));
       const date = String(values.get('date'));
-      const dueDate = String(values.get('dueDate'));
-      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || (dueDate && !parseDate(dueDate))) { showToast('Revisá el monto y las fechas.'); return; }
-      data.movements.unshift({ id: id(), type: String(values.get('type')), date, createdAt: new Date().toISOString(), person: String(values.get('person')).trim(), description: String(values.get('description')).trim(), direction: String(values.get('direction')), amount, dueDate: dueDate || '', balance: amount, status: dueDate ? 'Pendiente' : 'Registrado' });
-      persist(); closeModal(); render(); showToast('Movimiento guardado.');
+      const type = String(values.get('type'));
+      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || !['Ingreso general', 'Gasto general'].includes(type)) { showToast('Revisá el monto y la fecha.'); return; }
+      const future = date > todayKey();
+      data.movements.unshift({ id: id(), type, date, scheduledDate: future ? date : '', createdAt: new Date().toISOString(), person: '', description: String(values.get('description')).trim(), direction: type === 'Ingreso general' ? 'in' : 'out', amount, status: future ? 'Pendiente' : 'Realizado' });
+      persist(); closeModal(); render(); showToast(future ? 'Movimiento programado; todavía no afecta el dinero actual.' : 'Movimiento realizado y guardado.');
     });
   }
 
   function openMovementDetail(movementId) {
     const item = data.movements.find(row => row.id === movementId);
     if (!item) return;
-    const canPay = item.direction === 'out' && item.status === 'Pendiente' && item.dueDate;
-    openModal(item.type, formatDate(item.date, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Persona</span><b>${escapeHtml(item.person || '—')}</b></div><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || '—')}</b></div><div class="kv"><span>Tipo</span><b>${item.direction === 'in' ? 'Entrada' : 'Salida'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${item.dueDate ? `<div class="kv"><span>Vencimiento</span><b>${formatDate(item.dueDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${canPay ? `<button class="primary-button full" style="margin-top:14px" data-action="settle-movement" data-id="${escapeHtml(item.id)}">Marcar como pagado</button>` : ''}`);
+    const canRealize = item.status === 'Pendiente' || item.status === 'Programado';
+    const actionLabel = item.direction === 'in' ? 'Marcar realizado' : 'Marcar realizado';
+    const eventDate = movementDisplayDate(item);
+    openModal(displayMovementType(item), formatDate(eventDate, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || item.person || '—')}</b></div><div class="kv"><span>Tipo</span><b>${item.direction === 'in' ? 'Ingreso' : 'Gasto'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${eventDate ? `<div class="kv"><span>Fecha prevista</span><b>${formatDate(eventDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${canRealize ? `<button class="primary-button full" style="margin-top:14px" data-action="realize-movement" data-id="${escapeHtml(item.id)}">${actionLabel}</button>` : ''}`);
   }
 
-  function settleMovement(movementId) {
+  function realizeMovement(movementId) {
     const item = data.movements.find(row => row.id === movementId);
-    if (!item || item.direction !== 'out' || item.status !== 'Pendiente') return;
-    item.status = 'Pagado';
+    if (!item || !['Pendiente', 'Programado'].includes(item.status)) return;
+    item.status = 'Realizado';
     item.date = todayKey();
     item.createdAt = new Date().toISOString();
-    persist(); closeModal(); render(); showToast('Pago registrado.');
+    if (item.loanId) {
+      const loan = data.loans.find(record => record.id === item.loanId);
+      if (loan) loan.disbursed = true;
+    }
+    if (item.cardFinancingId) {
+      const financing = data.cardFinancings.find(record => record.id === item.cardFinancingId);
+      if (financing) financing.received = true;
+    }
+    persist(); closeModal(); render(); showToast(item.direction === 'in' ? 'Ingreso realizado.' : 'Gasto o entrega realizados.');
   }
 
   function exportBackup() {
@@ -420,14 +586,17 @@
     if (!backup.data.installments.every(item => item && typeof item.id === 'string' && typeof item.loanId === 'string' && Number.isFinite(item.amount) && Number.isFinite(item.paid))) return false;
     if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
+    for (const key of ['cardFinancings', 'cardPayments']) if (backup.data[key] !== undefined && !Array.isArray(backup.data[key])) return false;
+    if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid))) return false;
+    if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
     return true;
   }
 
   function mergeBackupData(current, incoming) {
     const merged = normalizeData(structuredClone(current));
-    for (const key of ['loans', 'installments', 'collections', 'movements']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments']) {
       const existingIds = new Set(merged[key].map(item => item.id));
-      for (const item of incoming[key]) {
+      for (const item of incoming[key] || []) {
         if (!existingIds.has(item.id)) {
           merged[key].push(structuredClone(item));
           existingIds.add(item.id);
@@ -471,6 +640,93 @@
     data[key].push(value); persist(); render(); showToast('Opción agregada.');
   }
 
+  function notificationStatusText() {
+    if (!('Notification' in window)) return 'Este navegador no ofrece notificaciones.';
+    if (Notification.permission === 'granted' && data.settings.notificationsEnabled) return 'Los avisos están activados.';
+    if (Notification.permission === 'denied') return 'El permiso está bloqueado en el navegador.';
+    return 'Los avisos están desactivados.';
+  }
+
+  function notificationButtonText() {
+    return ('Notification' in window && Notification.permission === 'granted' && data.settings.notificationsEnabled) ? 'Desactivar avisos' : 'Activar avisos de cobros';
+  }
+
+  async function registerServiceWorker() {
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) return null;
+    try { return await navigator.serviceWorker.register('./sw.js'); } catch (_) { return null; }
+  }
+
+  async function enableNotifications() {
+    if (data.settings.notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+      data.settings.notificationsEnabled = false; clearTimeout(notificationTimer); persist(); render(); showToast('Avisos desactivados.'); return;
+    }
+    if (!('Notification' in window)) { showToast('Este navegador no admite notificaciones.'); return; }
+    if (!window.isSecureContext) { showToast('Los avisos requieren abrir la app desde GitHub Pages o como PWA segura.'); return; }
+    if (Notification.permission === 'denied') { showToast('El permiso está bloqueado en la configuración del navegador.'); return; }
+    let permission;
+    try { permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission(); }
+    catch (_) { showToast('El navegador no permitió solicitar notificaciones.'); return; }
+    if (permission !== 'granted') { showToast('No se activaron los avisos.'); return; }
+    data.settings.notificationsEnabled = true;
+    persist();
+    await registerServiceWorker();
+    await checkDailyNotification();
+    scheduleNotificationTimeCheck();
+    render();
+    showToast('Avisos de cobros activados.');
+  }
+
+  async function checkDailyNotification() {
+    if (!data.settings.notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const today = todayKey();
+    if (data.settings.lastNotificationDate === today) return;
+    const [notificationHour, notificationMinute] = String(data.settings.notificationTime || '09:00').split(':').map(Number);
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    if (currentMinutes < (notificationHour * 60 + notificationMinute)) return;
+    const due = pendingInstallments().filter(item => item.dueDate === today);
+    if (!due.length) return;
+    const total = due.reduce((sum, item) => sum + dueLeft(item), 0);
+    const options = { body: `Tenés ${due.length} cobros pendientes por un total de ${money(total)}.`, tag: `cobros-${today}`, data: { url: `?page=calendar&date=${today}` } };
+    try {
+      const registration = await registerServiceWorker();
+      if (registration) await registration.showNotification('🔔 Cobros de hoy', options);
+      else new Notification('🔔 Cobros de hoy', options);
+      data.settings.lastNotificationDate = today;
+      persist();
+    } catch (_) { /* El permiso o el navegador pueden impedir mostrar el aviso. */ }
+  }
+
+  let midnightTimer;
+  let notificationTimer;
+  function scheduleNotificationTimeCheck() {
+    clearTimeout(notificationTimer);
+    if (!data.settings.notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const [rawHour, rawMinute] = String(data.settings.notificationTime || '09:00').split(':');
+    const hour = Math.max(0, Math.min(23, Number(rawHour) || 0));
+    const minute = Math.max(0, Math.min(59, Number(rawMinute) || 0));
+    const now = new Date();
+    let nextCheck = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0);
+    if (nextCheck <= now) nextCheck = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hour, minute, 0);
+    notificationTimer = setTimeout(() => { checkDailyNotification(); scheduleNotificationTimeCheck(); }, Math.max(1000, nextCheck.getTime() - Date.now()));
+  }
+
+  function scheduleDateRefresh() {
+    clearTimeout(midnightTimer);
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+    midnightTimer = setTimeout(() => {
+      const oldToday = calendarSelectedDate === dateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+      if (oldToday) calendarSelectedDate = todayKey();
+      calendarMonth = new Date((parseDate(calendarSelectedDate) || new Date()).getFullYear(), (parseDate(calendarSelectedDate) || new Date()).getMonth(), 1);
+      render(); checkDailyNotification(); scheduleDateRefresh();
+    }, Math.max(1000, midnight.getTime() - Date.now()));
+  }
+
+  function refreshDateDependentViews() {
+    if (calendarSelectedDate === todayKey() || page === 'home' || page === 'collections' || page === 'calendar') render();
+    checkDailyNotification(); scheduleNotificationTimeCheck();
+  }
+
   function showToast(message) {
     toastNode.textContent = message; toastNode.classList.add('show');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => toastNode.classList.remove('show'), 2600);
@@ -487,13 +743,25 @@
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
     else if (action === 'pay-installment') openPayForm(button.dataset.id);
     else if (action === 'loan-filter') { loanFilter = button.dataset.value; render(); }
-    else if (action === 'month-prev' || action === 'month-next') { calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + (action === 'month-next' ? 1 : -1), 1); render(); }
+    else if (action === 'movement-filter') { movementFilter = button.dataset.value; render(); }
+    else if (action === 'month-prev' || action === 'month-next') {
+      calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + (action === 'month-next' ? 1 : -1), 1);
+      calendarSelectedDate = calendarMonth.getFullYear() === new Date().getFullYear() && calendarMonth.getMonth() === new Date().getMonth() ? todayKey() : dateKey(calendarMonth);
+      render();
+    }
     else if (action === 'calendar-day') {
-      const matching = (data.installments.filter(item => item.dueDate === button.dataset.date));
-      if (matching.length) { const list = document.querySelector('#calendar-day-list'); list.innerHTML = `<div class="section-head"><h3>Cuotas del ${formatDate(button.dataset.date, { day: 'numeric', month: 'long' })}</h3></div><div class="list">${matching.map(item => renderInstallmentCard(item)).join('')}</div>`; list.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    } else if (action === 'new-movement') openMovementForm();
+      calendarSelectedDate = button.dataset.date; render();
+    } else if (action === 'calendar-event') openCalendarEvent(button.dataset.kind, button.dataset.id);
+    else if (action === 'calendar-collect') openPayForm(button.dataset.id);
+    else if (action === 'calendar-pay-card') openCardPaymentForm(button.dataset.id);
+    else if (action === 'new-movement') openMovementForm();
+    else if (action === 'new-financing') openFinancingForm();
+    else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
+    else if (action === 'pay-card') openCardPaymentForm(button.dataset.id);
+    else if (action === 'schedule-card-payment') openCardScheduleForm(button.dataset.id);
     else if (action === 'movement-detail') openMovementDetail(button.dataset.id);
-    else if (action === 'settle-movement') settleMovement(button.dataset.id);
+    else if (action === 'realize-movement') realizeMovement(button.dataset.id);
+    else if (action === 'enable-notifications') enableNotifications();
     else if (action === 'export-backup') exportBackup();
     else if (action === 'choose-import') document.querySelector('#backup-file')?.click();
     else if (action === 'remove-setting') {
@@ -514,7 +782,11 @@
     if (event.key === 'Escape') closeModal();
     if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.loan-card, .installment-card')) { event.preventDefault(); event.target.click(); }
   });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateDependentViews(); });
+  window.addEventListener('focus', refreshDateDependentViews);
   document.querySelector('#quick-add').addEventListener('click', openLoanForm);
 
   render();
+  scheduleDateRefresh();
+  registerServiceWorker().then(() => { checkDailyNotification(); scheduleNotificationTimeCheck(); });
 })();
