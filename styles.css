@@ -123,21 +123,37 @@ main { padding: 12px 0 30px; }
 .calendar-head button { border: 0; background: #f0f3f8; border-radius: 10px; width: 34px; height: 34px; font-size: 19px; color: #42526a; cursor: pointer; }
 .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .weekday { text-align: center; font-size: 9px; font-weight: 800; color: #93a0b1; padding: 5px 0; }
-.calendar-day { position: relative; min-height: 58px; border: 0; background: transparent; border-radius: 10px; display: flex; align-items: center; justify-content: flex-start; flex-direction: column; gap: 2px; padding: 5px 2px 10px; font-size: 11px; color: #637084; cursor: pointer; }
-.calendar-date-number { line-height: 14px; }
-.calendar-ref-list { display: flex; flex-direction: column; align-items: center; width: 100%; gap: 1px; line-height: 1.05; }
-.calendar-ref { max-width: 100%; overflow: hidden; color: #8b5a12; font-size: 7px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-.calendar-day.selected .calendar-ref { color: #315fd1; }
+.calendar-day { position: relative; min-height: 76px; border: 0; background: transparent; border-radius: 10px; display: flex; align-items: center; justify-content: flex-start; flex-direction: column; gap: 4px; padding: 6px 2px 8px; color: #37445a; cursor: pointer; }
+.calendar-date-number { line-height: 20px; font-size: 15px; font-weight: 800; }
+.calendar-ref-list { display: flex; flex-direction: column; align-items: center; width: 100%; gap: 2px; line-height: 1.05; }
+.calendar-ref { max-width: 100%; overflow: hidden; color: #14774f; font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-day.selected .calendar-ref { filter: saturate(1.3); }
 .calendar-collection-card { display: grid; gap: 11px; }
 .calendar-collection-amount { align-items: baseline; }
 .calendar-collection-amount strong { font-size: 17px; }
-.calendar-day.today { outline: 2px solid #3165e8; color: #2658d1; font-weight: 800; }
+.calendar-day.today { outline: 2px solid #3165e8; background: #edf3ff; color: #1749bd; font-weight: 800; }
 .calendar-day.selected { background: #edf2ff; }
 .calendar-day.other { opacity: .3; }
 .calendar-day.has-due::after { content: ""; position: absolute; width: 5px; height: 5px; border-radius: 50%; bottom: 5px; background: #e6a13d; }
 .calendar-day.has-due.overdue-dot::after { background: #d95050; }
 .calendar-day.has-due.paid-dot::after { background: #27a476; }
 .calendar-count { position: absolute; top: 2px; right: 5px; color: #315fd1; font-size: 8px; font-weight: 800; }
+.calendar-ref.card-ref { color: #245cc2; }
+.calendar-ref.movement-ref { color: #b75b12; }
+.calendar-more { color: #69778d; font-size: 8px; font-weight: 800; }
+.calendar-event-card, .calendar-collection-card { overflow: hidden; padding: 0; }
+.calendar-event-toggle { width: 100%; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 13px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.calendar-event-toggle > span:first-child { display: grid; gap: 5px; min-width: 0; }
+.calendar-event-toggle strong { font-size: 13px; }
+.calendar-event-toggle small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.calendar-event-summary { display: grid; justify-items: end; gap: 5px; flex: 0 0 auto; }
+.calendar-event-summary b { font-size: 13px; }
+.calendar-event-summary .badge { font-style: normal; }
+.calendar-event-expanded { display: grid; gap: 11px; padding: 0 13px 13px; }
+.calendar-event-expanded .kv-list { padding: 10px; }
+.event-loan { border-left: 4px solid #1b9a6b; }
+.event-card { border-left: 4px solid #3165c9; }
+.event-movement { border-left: 4px solid #d78327; }
 .calendar-legend { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .legend-item { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #e6a13d; }
@@ -174,6 +190,27 @@ main { padding: 12px 0 30px; }
 .projection-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 10px; }
 .projection-total strong { color: var(--blue); font-size: 14px; white-space: nowrap; }
 .projection-note { margin: 8px 2px 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.configured-card { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; cursor: pointer; color: var(--ink); }
+.configured-card > span { min-width: 0; }
+.configured-card small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
+.configured-card > span:last-child { color: var(--blue); font-size: 10px; text-align: right; }
+.loan-next { margin-top: 8px; }
+.loan-detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 12px; }
+.loan-detail-actions .secondary-button, .loan-detail-actions .danger-button { min-height: 34px; padding: 7px 12px; font-size: 11px; }
+.installment-paid { background: #f1faf6; border-color: #d7eee4; }
+.installment-pending { background: #fff; }
+.installment-line .due { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.installment-line .due > span:last-child { color: var(--muted); font-size: 10px; }
+.event-delivery { border-left: 4px solid #7d64c5; }
+.event-income { border-left: 4px solid #1b9a6b; }
+.event-expense { border-left: 4px solid #d26060; }
+.event-card-payment, .event-card-transaction { border-left: 4px solid #d39332; }
+.today-button { min-height: 32px; padding: 5px 10px; font-size: 10px; }
+.movement-card { min-width: 0; overflow: hidden; }
+.movement-card .inline-details { min-width: 0; }
+.movement-card .inline-details > span { min-width: 0; overflow-wrap: anywhere; }
+.calendar-head { flex-wrap: wrap; }
+.collections-summary { margin-bottom: 15px; }
 .backup-card h3 { font-size: 14px; margin: 0 0 5px; }
 .backup-card p { font-size: 11px; color: var(--muted); line-height: 1.45; margin: 0 0 12px; }
 .movement-in { color: var(--green); }
@@ -195,5 +232,8 @@ main { padding: 12px 0 30px; }
   .summary-card { padding: 12px; min-height: 108px; }
   .summary-card .amount { font-size: 19px; }
   .nav-item small { font-size: 8px; }
+  .configured-card { align-items: flex-start; }
+  .configured-card > span:last-child { max-width: 42%; }
+  .collections-summary .summary-card .amount { font-size: 17px; }
   .form-grid { gap: 10px; }
 }
