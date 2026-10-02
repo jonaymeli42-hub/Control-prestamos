@@ -1,7 +1,7 @@
 {
   "name": "Control de préstamos",
   "short_name": "Préstamos",
-  "id": "https://jonaymeli42-hub.github.io/Control-prestamos/",
+  "id": "https://jonaymeli42-hub.github.io/Control-prestamos-v2/",
   "description": "Control local de préstamos, cuotas, cobros, movimientos y financiaciones de tarjetas.",
   "lang": "es-AR",
   "start_url": "https://jonaymeli42-hub.github.io/Control-prestamos/",
