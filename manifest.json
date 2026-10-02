@@ -1,10 +1,11 @@
 {
   "name": "Control de préstamos",
   "short_name": "Préstamos",
+  "id": "/Control-prestamos/",
   "description": "Control local de préstamos, cuotas, cobros, movimientos y financiaciones de tarjetas.",
   "lang": "es-AR",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/Control-prestamos/",
+  "scope": "/Control-prestamos/",
   "display": "standalone",
   "background_color": "#f5f7fb",
   "theme_color": "#f5f7fb",
