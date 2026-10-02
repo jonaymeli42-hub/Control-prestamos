@@ -6,13 +6,13 @@
   const BACKUP_VERSION = 1;
   const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
   const HISTORICAL_TOTALS = [
-    { id: 'plata-recibida', label: 'Plata recibida', amount: 36376484.70 },
-    { id: 'plata-devuelta', label: 'Plata devuelta', amount: 11274000.00 },
-    { id: 'plata-para-prestamos', label: 'Plata para préstamos', amount: 31500000.00 },
-    { id: 'plata-para-prestamos-semanales', label: 'Plata para préstamos semanales', amount: 4600000.00 },
-    { id: 'plata-recibida-prestamos-semanales', label: 'Plata recibida préstamos semanales', amount: 4594500.00 },
-    { id: 'plata-recibida-tarjetas', label: 'Plata recibida tarjetas', amount: 10200000.00 },
-    { id: 'pagos-y-otros', label: 'Pagos y otros', amount: 1996984.70 }
+    { id: 'plata-recibida', label: 'Plata recibida', amount: 36756484.70, direction: 'in' },
+    { id: 'plata-recibida-prestamos-semanales', label: 'Plata recibida préstamos semanales', amount: 4894500.00, direction: 'in' },
+    { id: 'plata-recibida-tarjetas', label: 'Plata recibida tarjetas', amount: 10200000.00, direction: 'in' },
+    { id: 'plata-devuelta', label: 'Plata devuelta', amount: 11274000.00, direction: 'out' },
+    { id: 'plata-para-prestamos', label: 'Plata para préstamos', amount: 33980000.00, direction: 'out' },
+    { id: 'pagos-y-otros', label: 'Pagos y otros', amount: 1996984.70, direction: 'out' },
+    { id: 'plata-para-prestamos-semanales', label: 'Plata para préstamos semanales', amount: 4600000.00, direction: 'out' }
   ];
   const INITIAL_DATA = {
     app: BACKUP_FORMAT,
@@ -55,6 +55,8 @@
       if (!Array.isArray(result[key])) result[key] = [...INITIAL_DATA[key]];
     }
     result.settings = { ...INITIAL_DATA.settings, ...(value.settings || {}) };
+    // The historical totals are fixed reference data. Migrate older saved totals to the definitive set.
+    result.historical = structuredClone(HISTORICAL_TOTALS);
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(result.settings.notificationTime)) result.settings.notificationTime = INITIAL_DATA.settings.notificationTime;
     result.loans = result.loans.map(loan => ({ ...loan, disbursed: loan.disbursed !== false }));
     result.cardFinancings = result.cardFinancings.map(financing => ({ ...financing, paid: Number(financing.paid) || 0, received: financing.received !== false }));
@@ -147,7 +149,38 @@
     return roundMoney(pendingInstallments().reduce((sum, item) => sum + dueLeft(item), 0));
   }
   function futureMoney() {
-    return roundMoney(receivableTotal() - cardDebtTotal());
+    return roundMoney(movementBalance() + receivableTotal() - cardDebtTotal());
+  }
+  function futureProjection() {
+    const start = parseDate(todayKey());
+    const current = movementBalance();
+    const receivables = pendingInstallments();
+    const payables = data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005);
+    const datedItems = [
+      ...receivables.map(item => item.dueDate),
+      ...payables.map(item => item.nextPaymentDate)
+    ].map(parseDate).filter(Boolean);
+    let periodCount = 12;
+    datedItems.forEach(date => {
+      const difference = (date.getFullYear() - start.getFullYear()) * 12 + date.getMonth() - start.getMonth();
+      periodCount = Math.max(periodCount, difference + 1);
+    });
+    const undatedReceivables = receivables.filter(item => !parseDate(item.dueDate)).reduce((sum, item) => sum + dueLeft(item), 0);
+    const undatedPayables = payables.filter(item => !parseDate(item.nextPaymentDate)).reduce((sum, item) => sum + financingBalance(item), 0);
+    return Array.from({ length: periodCount }, (_, index) => {
+      const endDate = dateKey(new Date(start.getFullYear(), start.getMonth() + index + 1, 0));
+      const collected = receivables.filter(item => parseDate(item.dueDate) && dateKey(item.dueDate) <= endDate).reduce((sum, item) => sum + dueLeft(item), 0);
+      const datedObligations = payables.filter(item => parseDate(item.nextPaymentDate) && dateKey(item.nextPaymentDate) <= endDate).reduce((sum, item) => sum + financingBalance(item), 0);
+      const cumulativeCollections = roundMoney(collected + (index === periodCount - 1 ? undatedReceivables : 0));
+      const obligations = roundMoney(datedObligations + (index === periodCount - 1 ? undatedPayables : 0));
+      return {
+        label: new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(new Date(start.getFullYear(), start.getMonth() + index, 1)).replace(/^./, letter => letter.toLocaleUpperCase('es-AR')),
+        current,
+        collected: cumulativeCollections,
+        obligations,
+        available: roundMoney(current + cumulativeCollections - obligations)
+      };
+    });
   }
   function movementCategory(item) {
     if (item.type === 'Cobro préstamo') return 'cobros';
@@ -189,15 +222,17 @@
     const payable = cardDebtTotal();
     const current = movementBalance();
     const future = futureMoney();
+    const projection = futureProjection();
     const next = allPending.filter(item => item.dueDate >= todayKey()).slice(0, 3);
     const recentLoans = data.loans.filter(loan => loanTotals(loan).status !== 'Pagado').slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
-        <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Préstamos pendientes − deuda de tarjetas</span></article>
+        <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span></article>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de tarjetas</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
+      <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div></div><div class="projection-list">${projection.map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y saldos de tarjetas según fecha prevista. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <button class="primary-button full add-loan" data-action="new-loan"><span>＋</span>Agregar nuevo préstamo</button>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${next.length ? `<div class="list">${next.map(item => renderInstallmentCard(item, true)).join('')}</div>` : emptyState('↗', 'Todavía no hay cobros', 'Al registrar un préstamo, sus próximas cuotas aparecerán acá.', '<button class="primary-button" data-action="new-loan">Crear préstamo</button>')}</section>
@@ -426,8 +461,13 @@
   }
 
   function renderMore() {
+    const historicalIn = data.historical.filter(item => item.direction === 'in');
+    const historicalOut = data.historical.filter(item => item.direction === 'out');
+    const historicalTotalIn = roundMoney(historicalIn.reduce((sum, item) => sum + item.amount, 0));
+    const historicalTotalOut = roundMoney(historicalOut.reduce((sum, item) => sum + item.amount, 0));
+    const historicalBalance = roundMoney(historicalTotalIn - historicalTotalOut);
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
-      <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior. Son datos históricos y no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><div class="historical-list">${data.historical.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div></section>
+      <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
       <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section>
       <section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section>
