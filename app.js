@@ -5,10 +5,20 @@
   const BACKUP_FORMAT = 'control-prestamos-backup';
   const BACKUP_VERSION = 1;
   const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
+  const HISTORICAL_TOTALS = [
+    { id: 'plata-recibida', label: 'Plata recibida', amount: 36376484.70 },
+    { id: 'plata-devuelta', label: 'Plata devuelta', amount: 11274000.00 },
+    { id: 'plata-para-prestamos', label: 'Plata para préstamos', amount: 31500000.00 },
+    { id: 'plata-para-prestamos-semanales', label: 'Plata para préstamos semanales', amount: 4600000.00 },
+    { id: 'plata-recibida-prestamos-semanales', label: 'Plata recibida préstamos semanales', amount: 4594500.00 },
+    { id: 'plata-recibida-tarjetas', label: 'Plata recibida tarjetas', amount: 10200000.00 },
+    { id: 'pagos-y-otros', label: 'Pagos y otros', amount: 1996984.70 }
+  ];
   const INITIAL_DATA = {
     app: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     loans: [], installments: [], collections: [], movements: [], cardFinancings: [], cardPayments: [],
+    historical: [...HISTORICAL_TOTALS],
     people: ['Harry', 'Semanal', 'Marcelo', 'Jano', '12 Brasas'],
     groups: ['H', 'S', 'M', 'J', '12B'],
     loanTypes: [...LOAN_TYPES],
@@ -41,7 +51,7 @@
   function normalizeData(value) {
     if (!value || typeof value !== 'object') return structuredClone(INITIAL_DATA);
     const result = { ...structuredClone(INITIAL_DATA), ...value };
-    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'people', 'groups', 'loanTypes', 'cards']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'people', 'groups', 'loanTypes', 'cards', 'historical']) {
       if (!Array.isArray(result[key])) result[key] = [...INITIAL_DATA[key]];
     }
     result.settings = { ...INITIAL_DATA.settings, ...(value.settings || {}) };
@@ -417,7 +427,8 @@
 
   function renderMore() {
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
-      <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones y pagos de tarjetas, configuración y avisos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
+      <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior. Son datos históricos y no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><div class="historical-list">${data.historical.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div></section>
+      <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section>
       <section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section>
       <section class="section"><div class="section-head"><h3>Configuración</h3></div>
@@ -512,7 +523,26 @@
     if (!loan) return;
     const totals = loanTotals(loan);
     const installments = totals.installments.map(item => `<div class="installment-line"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong>Pagado ${money(item.paid)} de ${money(item.amount)}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${dueLeft(item) > 0.005 && loan.disbursed !== false ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : loan.disbursed === false ? '<span class="badge pending">Sin entregar</span>' : '<span class="badge paid">Pagada</span>'}</div></div>`).join('');
-    openModal(`Préstamo ${loan.code}`, loan.person, `<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div>${loan.notes ? `<div class="kv"><span>Notas</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}</div><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>`);
+    openModal(`Préstamo ${loan.code}`, loan.person, `<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div>${loan.notes ? `<div class="kv"><span>Notas</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}</div><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section><button class="danger-button full" style="margin-top:18px" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar préstamo</button>`);
+  }
+
+  function deleteLoan(loanId) {
+    const loan = data.loans.find(item => item.id === loanId);
+    if (!loan) return;
+    const installmentIds = new Set(data.installments.filter(item => item.loanId === loanId).map(item => item.id).filter(Boolean));
+    const relatedCollections = data.collections.filter(item => item.loanId === loanId || installmentIds.has(item.installmentId));
+    const collectionIds = new Set(relatedCollections.map(item => item.id).filter(Boolean));
+    if (!window.confirm(`Se eliminará el préstamo ${loan.code || ''} y toda la información asociada: cuotas, cobros y movimientos de entrega y cobro. Esta acción no se puede deshacer. ¿Querés continuar?`)) return;
+
+    data.loans = data.loans.filter(item => item.id !== loanId);
+    data.installments = data.installments.filter(item => item.loanId !== loanId);
+    data.collections = data.collections.filter(item => !relatedCollections.includes(item));
+    data.movements = data.movements.filter(item => {
+      if (collectionIds.has(item.collectionId)) return false;
+      if (item.loanId !== loanId) return true;
+      return !['Préstamo dado', 'Préstamo entregado', 'Cobro préstamo'].includes(item.type);
+    });
+    persist(); closeModal(); render(); showToast('Préstamo e información asociada eliminados.');
   }
 
   function openPayForm(installmentId) {
@@ -613,12 +643,13 @@
     for (const key of ['cardFinancings', 'cardPayments']) if (backup.data[key] !== undefined && !Array.isArray(backup.data[key])) return false;
     if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid))) return false;
     if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
+    if (backup.data.historical !== undefined && (!Array.isArray(backup.data.historical) || !backup.data.historical.every(item => item && typeof item.id === 'string' && typeof item.label === 'string' && Number.isFinite(item.amount)))) return false;
     return true;
   }
 
   function mergeBackupData(current, incoming) {
     const merged = normalizeData(structuredClone(current));
-    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'historical']) {
       const existingIds = new Set(merged[key].map(item => item.id));
       for (const item of incoming[key] || []) {
         if (!existingIds.has(item.id)) {
@@ -765,6 +796,7 @@
     if (action === 'new-loan') openLoanForm();
     else if (action === 'close-modal') closeModal();
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
+    else if (action === 'delete-loan') deleteLoan(button.dataset.id);
     else if (action === 'pay-installment') openPayForm(button.dataset.id);
     else if (action === 'loan-filter') { loanFilter = button.dataset.value; render(); }
     else if (action === 'movement-filter') { movementFilter = button.dataset.value; render(); }
