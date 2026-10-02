@@ -2,6 +2,8 @@
   'use strict';
 
   const STORAGE_KEY = 'control-prestamos-data';
+  const THEME_STORAGE_KEY = 'control-prestamos-appearance';
+  const VALID_THEMES = ['light', 'dark', 'auto'];
   const BACKUP_FORMAT = 'control-prestamos-backup';
   const BACKUP_VERSION = 1;
   const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
@@ -40,6 +42,25 @@
   const app = document.querySelector('#app');
   const modalRoot = document.querySelector('#modal-root');
   const toastNode = document.querySelector('#toast');
+
+  function loadThemePreference() {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      return VALID_THEMES.includes(saved) ? saved : 'auto';
+    } catch (_) { return 'auto'; }
+  }
+
+  let themePreference = loadThemePreference();
+  const colorSchemeQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+
+  function applyTheme() {
+    const resolved = themePreference === 'auto' ? (colorSchemeQuery?.matches ? 'dark' : 'light') : themePreference;
+    document.documentElement.dataset.theme = resolved;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#141c28' : '#f5f7fb');
+  }
+
+  applyTheme();
+  colorSchemeQuery?.addEventListener?.('change', () => { if (themePreference === 'auto') applyTheme(); });
 
   function loadData() {
     try {
@@ -541,6 +562,7 @@
     const historicalTotalOut = roundMoney(historicalOut.reduce((sum, item) => sum + item.amount, 0));
     const historicalBalance = roundMoney(historicalTotalIn - historicalTotalOut);
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
+      <section class="section settings-block"><div class="section-head"><h3>Apariencia</h3></div><section class="backup-card appearance-card"><div><h3>Tema visual</h3><p>Elegí el aspecto de la aplicación.</p></div><div class="field"><label for="theme-select">Tema</label><select id="theme-select" name="theme"><option value="light" ${themePreference === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${themePreference === 'dark' ? 'selected' : ''}>Oscuro</option><option value="auto" ${themePreference === 'auto' ? 'selected' : ''}>Automático</option></select></div></section></section>
       <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
       <section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section></section>
@@ -1070,6 +1092,12 @@
   });
   document.addEventListener('change', event => {
     if (event.target.id === 'backup-file') importBackup(event.target.files?.[0]);
+    if (event.target.id === 'theme-select' && VALID_THEMES.includes(event.target.value)) {
+      themePreference = event.target.value;
+      try { localStorage.setItem(THEME_STORAGE_KEY, themePreference); } catch (_) {}
+      applyTheme();
+      render();
+    }
   });
   document.addEventListener('focusin', event => {
     if (event.target.matches('[data-money-input]')) event.target.value = String(event.target.value || '').replace(/\D/g, '');

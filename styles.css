@@ -243,3 +243,87 @@ main { padding: 12px 0 30px; }
   .collections-summary .summary-card .amount { font-size: 17px; }
   .form-grid { gap: 10px; }
 }
+
+/* Tema oscuro: conserva la estructura y los colores semánticos de la aplicación. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #e8edf5;
+  background: #141c28;
+  --ink: #e8edf5;
+  --muted: #a9b5c5;
+  --line: #374457;
+  --blue: #91adff;
+  --blue-soft: #26375c;
+  --green: #62d3a2;
+  --green-soft: #203d35;
+  --orange: #f2bd6c;
+  --orange-soft: #493821;
+  --red: #f18c87;
+  --red-soft: #482d32;
+  --card: #202b39;
+  --shadow: 0 8px 28px rgba(0, 0, 0, .2);
+}
+:root[data-theme="dark"] body { color: var(--ink); background: #141c28; }
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .date-pill,
+:root[data-theme="dark"] .summary-card,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .filter-chip,
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .installment-line,
+:root[data-theme="dark"] .calendar,
+:root[data-theme="dark"] .backup-card,
+:root[data-theme="dark"] .projection-card,
+:root[data-theme="dark"] .setting-tag,
+:root[data-theme="dark"] .installment-pending { background-color: #202b39; color: var(--ink); }
+:root[data-theme="dark"] .summary-card.current { background: linear-gradient(140deg, #202b39, #203d35); border-color: #315748; }
+:root[data-theme="dark"] .summary-card.future { background: linear-gradient(140deg, #202b39, #26375c); border-color: #354a72; }
+:root[data-theme="dark"] .summary-card.receivable { background: linear-gradient(140deg, #202b39, #493821); border-color: #5a4930; }
+:root[data-theme="dark"] .summary-card.payable { background: linear-gradient(140deg, #202b39, #482d32); border-color: #5a393e; }
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .calendar-head button,
+:root[data-theme="dark"] .close-button,
+:root[data-theme="dark"] .setting-tag button { background: #303d4f; color: #d5deea; }
+:root[data-theme="dark"] .bottom-nav { background: rgba(25, 35, 48, .97); }
+:root[data-theme="dark"] .empty-state { border-color: #46556a; }
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .setting-add input { border-color: #46556a; }
+:root[data-theme="dark"] .modal { background: #1a2432; }
+:root[data-theme="dark"] .calendar-day { color: #e0e8f4; }
+:root[data-theme="dark"] .calendar-day.today { background: #26375c; color: #c1d1ff; outline-color: #91adff; }
+:root[data-theme="dark"] .calendar-day.selected,
+:root[data-theme="dark"] .calendar-day.has-due { background: #273547; }
+:root[data-theme="dark"] .calendar-day.has-due.selected { background: #2b3c59; }
+:root[data-theme="dark"] .calendar-ref { color: #76d9af; }
+:root[data-theme="dark"] .calendar-ref.card-ref { color: #9bb8ff; }
+:root[data-theme="dark"] .calendar-ref.movement-ref { color: #f0b66b; }
+:root[data-theme="dark"] .calendar-more,
+:root[data-theme="dark"] .weekday,
+:root[data-theme="dark"] .eyebrow,
+:root[data-theme="dark"] .summary-card .label,
+:root[data-theme="dark"] .summary-card .hint,
+:root[data-theme="dark"] .inline-details span,
+:root[data-theme="dark"] .field label,
+:root[data-theme="dark"] .historical-note,
+:root[data-theme="dark"] .historical-section h4,
+:root[data-theme="dark"] .historical-summary > div,
+:root[data-theme="dark"] .nav-item { color: #a9b5c5; }
+:root[data-theme="dark"] .historical-section { border-color: #35435a; background: linear-gradient(145deg, #202b39, #202a3d); }
+:root[data-theme="dark"] .historical-eyebrow,
+:root[data-theme="dark"] .historical-row strong,
+:root[data-theme="dark"] .historical-summary strong,
+:root[data-theme="dark"] .projection-card h4 { color: #a9bcff; }
+:root[data-theme="dark"] .historical-row { border-color: #374457; }
+:root[data-theme="dark"] .historical-summary { border-color: #374457; }
+:root[data-theme="dark"] .calendar-head button { color: #d5deea; }
+:root[data-theme="dark"] .filter-chip { color: #c0cada; border-color: #374457; }
+:root[data-theme="dark"] .filter-chip.active { color: #c1d1ff; background: #26375c; border-color: #465d91; }
+:root[data-theme="dark"] .installment-paid { background: #20382f; border-color: #315748; }
+:root[data-theme="dark"] .alert { background: #493821; color: #f2d5a5; }
+:root[data-theme="dark"] .setting-add input { background: #202b39; color: var(--ink); }
+:root[data-theme="dark"] .setting-add button { background: var(--blue-soft); color: #c1d1ff; }
+:root[data-theme="dark"] .bottom-nav { border-color: var(--line); }
