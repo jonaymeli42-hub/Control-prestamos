@@ -322,6 +322,29 @@
     }).sort((a, b) => a.number - b.number);
   }
 
+  function calendarEventReference(event) {
+    if (event.kind === 'card-payment' || event.kind === 'card-transaction') return event.detail.split(' · ')[0] || 'Tarjeta';
+    if (event.kind === 'installment') {
+      const installment = data.installments.find(item => item.id === event.id);
+      const loan = installment && data.loans.find(item => item.id === installment.loanId);
+      if (!loan || !installment) return event.detail || event.label;
+      const count = loanInstallments(loan.id).length || Number(loan.count) || 1;
+      return `${loan.code || 'Préstamo'} · C${installment.number}/${count}`;
+    }
+    const movement = data.movements.find(item => item.id === event.id);
+    const loan = movement?.loanId && data.loans.find(item => item.id === movement.loanId);
+    if (loan) {
+      const collection = movement.collectionId && data.collections.find(item => item.id === movement.collectionId);
+      const installment = collection && data.installments.find(item => item.id === collection.installmentId);
+      if (installment) {
+        const count = loanInstallments(loan.id).length || Number(loan.count) || 1;
+        return `${loan.code || 'Préstamo'} · C${installment.number}/${count}`;
+      }
+      return `${loan.code || 'Préstamo'} · ${event.kind === 'delivery' ? 'Entrega' : 'Cobro'}`;
+    }
+    return event.label || event.detail || 'Movimiento';
+  }
+
   function renderCalendarInstallment(item) {
     const loan = data.loans.find(record => record.id === item.loanId);
     if (!loan) return '';
@@ -365,8 +388,8 @@
     const days = new Date(year, month + 1, 0).getDate();
     const slots = Math.ceil((offset + days) / 7) * 7;
     const events = calendarEvents();
-    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'installment', date: item.dueDate, amount: dueLeft(item), label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
-    const calendarItems = [...events.filter(event => event.kind !== 'installment'), ...allLoanInstallments];
+    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'installment', number: item.number, date: item.dueDate, amount: dueLeft(item), label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
+    const calendarItems = [...events.filter(event => event.kind !== 'installment'), ...allLoanInstallments].sort((a, b) => a.date.localeCompare(b.date) || (a.kind === 'installment' ? 0 : 1) - (b.kind === 'installment' ? 0 : 1) || (a.number || 0) - (b.number || 0) || a.label.localeCompare(b.label));
     const eventsByDate = new Map();
     calendarItems.forEach(event => {
       if (!eventsByDate.has(event.date)) eventsByDate.set(event.date, []);
@@ -383,9 +406,8 @@
         : event.kind === 'card-payment' || ['Pendiente', 'Programado'].includes(event.status));
       const classes = ['calendar-day', !inMonth ? 'other' : '', key === todayKey() ? 'today' : '', key === calendarSelectedDate ? 'selected' : '', count ? `has-due ${hasPending ? (key < todayKey() ? 'overdue-dot' : '') : 'paid-dot'}` : ''].filter(Boolean).join(' ');
       const summaries = dayEvents.slice(0, 2).map(event => {
-        if (event.kind === 'installment') { const item = data.installments.find(row => row.id === event.id); const loan = item && data.loans.find(row => row.id === item.loanId); return `<span class="calendar-ref loan-ref">${escapeHtml(loan?.code || 'Cobro')} · C${item?.number || ''}/${loan?.count || loanInstallments(loan?.id).length || ''}</span>`; }
         const type = ['card-payment', 'card-transaction'].includes(event.kind) ? 'card-ref' : ['income', 'expense', 'movement'].includes(event.kind) ? 'movement-ref' : 'loan-ref';
-        return `<span class="calendar-ref ${type}">${escapeHtml(event.kind.startsWith('card') ? (event.detail.split(' · ')[0] || 'Tarjeta') : (event.label || event.detail))}</span>`;
+        return `<span class="calendar-ref ${type}">${escapeHtml(calendarEventReference(event))}</span>`;
       }).join('');
       return `<button class="${classes}" data-action="calendar-day" data-date="${key}" ${!inMonth ? 'disabled' : ''}><span class="calendar-date-number">${date.getDate()}</span>${summaries ? `<span class="calendar-ref-list">${summaries}${count > 2 ? `<span class="calendar-more">+${count - 2}</span>` : ''}</span>` : ''}</button>`;
     }).join('');
