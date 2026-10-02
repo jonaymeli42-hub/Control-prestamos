@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f7fb">
+  <meta name="description" content="Controlá préstamos, cuotas, cobros y movimientos desde tu celular.">
+  <title>Control de préstamos</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">$</div>
+      <div><p class="eyebrow">CONTROL PERSONAL</p><h1>Control de préstamos</h1></div>
+      <button class="icon-button" id="quick-add" aria-label="Agregar préstamo" title="Agregar préstamo">＋</button>
+    </header>
+    <main id="app" tabindex="-1" aria-live="polite"></main>
+    <nav class="bottom-nav" aria-label="Navegación principal">
+      <button data-page="home" class="nav-item active"><span>⌂</span><small>Inicio</small></button>
+      <button data-page="loans" class="nav-item"><span>▤</span><small>Préstamos</small></button>
+      <button data-page="collections" class="nav-item"><span>↓</span><small>Cobros</small></button>
+      <button data-page="calendar" class="nav-item"><span>▦</span><small>Calendario</small></button>
+      <button data-page="movements" class="nav-item"><span>↔</span><small>Movimientos</small></button>
+      <button data-page="more" class="nav-item"><span>•••</span><small>Más</small></button>
+    </nav>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

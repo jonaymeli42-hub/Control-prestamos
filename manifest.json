@@ -1,0 +1,12 @@
+{
+  "name": "Control de préstamos",
+  "short_name": "Préstamos",
+  "description": "Control local de préstamos, cuotas y cobros.",
+  "lang": "es-AR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#f5f7fb",
+  "icons": []
+}
