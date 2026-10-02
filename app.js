@@ -12,7 +12,7 @@
     people: ['Harry', 'Semanal', 'Marcelo', 'Jano', '12 Brasas'],
     groups: ['H', 'S', 'M', 'J', '12B'],
     loanTypes: [...LOAN_TYPES],
-    cards: ['Visa', 'Mastercard', 'Naranja', 'American Express', 'Otra'],
+    cards: ['VISA Galicia mia', 'Master Galicia mia', 'NARANJA', 'VISA BNA', 'MASTER BNA', 'Otra'],
     settings: { currency: 'ARS', locale: 'es-AR', initialBalance: 0, notificationsEnabled: false, notificationTime: '09:00', lastNotificationDate: '' }
   };
 
@@ -243,6 +243,22 @@
     return events.filter(event => parseDate(event.date)).sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
   }
 
+  function calendarLoanInstallments(date) {
+    return data.installments.filter(item => {
+      if (item.dueDate !== date) return false;
+      const loan = data.loans.find(record => record.id === item.loanId);
+      return Boolean(loan && loan.disbursed !== false);
+    }).sort((a, b) => a.number - b.number);
+  }
+
+  function renderCalendarInstallment(item) {
+    const loan = data.loans.find(record => record.id === item.loanId);
+    if (!loan) return '';
+    const paid = dueLeft(item) <= 0.005;
+    const left = dueLeft(item);
+    return `<article class="card calendar-collection-card"><div class="row-top"><div><div class="person">${escapeHtml(loan.code || 'Préstamo')}</div><div class="subtle">${escapeHtml(loan.person)} · Cuota ${item.number} de ${loan.count || loanInstallments(loan.id).length}</div></div><span class="badge ${paid ? 'paid' : 'pending'}">${paid ? 'Cobrado' : 'Pendiente'}</span></div><div class="row calendar-collection-amount"><strong>${money(paid ? item.amount : left)}</strong>${item.paid > 0.005 && !paid ? `<span class="subtle">Pagado ${money(item.paid)} de ${money(item.amount)}</span>` : ''}</div>${!paid ? `<button class="primary-button full" data-action="calendar-collect" data-id="${escapeHtml(item.id)}">✓ Marcar como cobrado</button>` : ''}</article>`;
+  }
+
   function renderCalendarEvent(event) {
     return `<article class="card installment-card" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" tabindex="0" role="button"><div class="row-top"><div><div class="person">${escapeHtml(event.label)}</div><div class="subtle">${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })}</div></div><div class="amount">${money(event.amount)}</div></div><div class="row" style="margin-top:9px"><span class="badge pending">Pendiente</span><span class="subtle">Ver detalle ›</span></div></article>`;
   }
@@ -269,8 +285,10 @@
     const days = new Date(year, month + 1, 0).getDate();
     const slots = Math.ceil((offset + days) / 7) * 7;
     const events = calendarEvents();
+    const paidInstallments = data.installments.filter(item => dueLeft(item) <= 0.005 && data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'paid-installment', date: item.dueDate }));
+    const calendarItems = [...events, ...paidInstallments];
     const eventsByDate = new Map();
-    events.forEach(event => {
+    calendarItems.forEach(event => {
       if (!eventsByDate.has(event.date)) eventsByDate.set(event.date, []);
       eventsByDate.get(event.date).push(event);
     });
@@ -278,16 +296,21 @@
       const date = new Date(year, month, index - offset + 1);
       const key = dateKey(date);
       const inMonth = date.getMonth() === month;
-      const count = (eventsByDate.get(key) || []).length;
-      const classes = ['calendar-day', !inMonth ? 'other' : '', key === todayKey() ? 'today' : '', key === calendarSelectedDate ? 'selected' : '', count ? `has-due ${key < todayKey() ? 'overdue-dot' : ''}` : ''].filter(Boolean).join(' ');
-      return `<button class="${classes}" data-action="calendar-day" data-date="${key}" ${!inMonth ? 'disabled' : ''}>${date.getDate()}${count > 1 ? `<span class="calendar-count">${count}</span>` : ''}</button>`;
+      const dayEvents = eventsByDate.get(key) || [];
+      const count = dayEvents.length;
+      const loanItems = calendarLoanInstallments(key);
+      const hasPending = dayEvents.some(event => event.kind === 'installment') || events.some(event => event.date === key && event.kind !== 'installment');
+      const classes = ['calendar-day', !inMonth ? 'other' : '', key === todayKey() ? 'today' : '', key === calendarSelectedDate ? 'selected' : '', count ? `has-due ${hasPending ? (key < todayKey() ? 'overdue-dot' : '') : 'paid-dot'}` : ''].filter(Boolean).join(' ');
+      return `<button class="${classes}" data-action="calendar-day" data-date="${key}" ${!inMonth ? 'disabled' : ''}><span class="calendar-date-number">${date.getDate()}</span>${loanItems.length ? `<span class="calendar-ref-list">${loanItems.map(item => { const loan = data.loans.find(record => record.id === item.loanId); return `<span class="calendar-ref">${escapeHtml(loan?.code || 'Cobro')}</span>`; }).join('')}</span>` : ''}${count > 1 && !loanItems.length ? `<span class="calendar-count">${count}</span>` : ''}</button>`;
     }).join('');
-    const selectedEvents = events.filter(event => event.date === calendarSelectedDate);
+    const selectedEvents = events.filter(event => event.date === calendarSelectedDate && event.kind !== 'installment');
+    const selectedInstallments = calendarLoanInstallments(calendarSelectedDate);
+    const hasSelectedItems = selectedInstallments.length || selectedEvents.length;
     return `${pageHeading('Calendario', 'Eventos vinculados a préstamos, tarjetas y movimientos.', `<span class="date-pill">HOY · ${formatDate(todayKey(), { day: 'numeric', month: 'short' })}</span>`)}
       <section class="calendar"><div class="calendar-head"><button aria-label="Mes anterior" data-action="month-prev">‹</button><strong>${new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(calendarMonth)}</strong><button aria-label="Mes siguiente" data-action="month-next">›</button></div>
       <div class="calendar-grid">${['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(day => `<div class="weekday">${day}</div>`).join('')}${cells}</div>
       <div class="calendar-legend"><span class="legend-item"><i class="dot"></i>Evento pendiente</span><span class="legend-item"><i class="dot today"></i>Hoy</span></div></section>
-      <section class="section"><div class="section-head"><h3>Eventos del ${calendarSelectedDate === todayKey() ? 'día de hoy' : formatDate(calendarSelectedDate, { day: 'numeric', month: 'long' })}</h3></div>${selectedEvents.length ? `<div class="list">${selectedEvents.map(renderCalendarEvent).join('')}</div>` : emptyState('▦', 'Sin eventos para este día', 'Las cuotas, pagos e ingresos programados aparecerán acá.')}</section>`;
+      <section class="section"><div class="section-head"><h3>Agenda del ${calendarSelectedDate === todayKey() ? 'día de hoy' : formatDate(calendarSelectedDate, { day: 'numeric', month: 'long' })}</h3></div>${hasSelectedItems ? `<div class="list">${selectedInstallments.map(renderCalendarInstallment).join('')}${selectedEvents.map(renderCalendarEvent).join('')}</div>` : emptyState('▦', 'Sin eventos para este día', 'Las cuotas, pagos e ingresos programados aparecerán acá.')}</section>`;
   }
 
   function renderMovements() {
@@ -310,6 +333,7 @@
     const records = [...data.cardFinancings].sort((a, b) => (b.receivedDate || '').localeCompare(a.receivedDate || ''));
     return `${pageHeading('Tarjetas', `${records.length} financiaciones`, '<button class="primary-button" data-action="new-financing">＋ Nueva</button>')}
       <section class="summary-grid card-summary-grid"><article class="summary-card current"><span class="label">Total recibido</span><span class="amount">${money(totals.received)}</span></article><article class="summary-card future"><span class="label">Total a devolver</span><span class="amount">${money(totals.repay)}</span></article><article class="summary-card receivable"><span class="label">Total pagado</span><span class="amount">${money(totals.paid)}</span></article><article class="summary-card payable"><span class="label">Total pendiente</span><span class="amount">${money(totals.balance)}</span></article></section>
+      <section class="section"><div class="section-head"><h3>Tarjetas disponibles</h3></div>${renderSettingGroup('Tarjetas', 'cards', data.cards)}</section>
       <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones de tarjeta', 'Registrá el dinero recibido y sus cargos para seguir el saldo.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section>`;
   }
 
