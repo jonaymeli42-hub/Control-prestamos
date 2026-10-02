@@ -243,7 +243,7 @@
   function renderMore() {
     return `${pageHeading('Más', 'Configuración y respaldo de tus datos.')}
       <section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un archivo JSON con todos tus préstamos, cuotas, cobros, movimientos y listas.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
-      <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para recuperar los datos. La importación reemplazará los datos actuales.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section>
+      <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section>
       <section class="section"><div class="section-head"><h3>Configuración</h3></div>
         ${renderSettingGroup('Personas', 'people', data.people)}${renderSettingGroup('Grupos', 'groups', data.groups)}${renderSettingGroup('Tipos de préstamo', 'loanTypes', data.loanTypes)}${renderSettingGroup('Tarjetas', 'cards', data.cards)}
       </section><p class="subtle" style="text-align:center;margin-top:24px">Los datos se guardan en este dispositivo. Exportá un respaldo con regularidad.</p>`;
@@ -415,10 +415,38 @@
     const requiredArrays = ['loans', 'installments', 'collections', 'movements', 'people', 'groups', 'loanTypes', 'cards'];
     if (!requiredArrays.every(key => Array.isArray(backup.data[key]))) return false;
     if (!backup.data.settings || typeof backup.data.settings !== 'object') return false;
+    if (!['people', 'groups', 'loanTypes', 'cards'].every(key => backup.data[key].every(value => typeof value === 'string'))) return false;
     if (!backup.data.loans.every(loan => loan && typeof loan.id === 'string' && typeof loan.person === 'string' && Number.isFinite(loan.capital))) return false;
     if (!backup.data.installments.every(item => item && typeof item.id === 'string' && typeof item.loanId === 'string' && Number.isFinite(item.amount) && Number.isFinite(item.paid))) return false;
+    if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
     return true;
+  }
+
+  function mergeBackupData(current, incoming) {
+    const merged = normalizeData(structuredClone(current));
+    for (const key of ['loans', 'installments', 'collections', 'movements']) {
+      const existingIds = new Set(merged[key].map(item => item.id));
+      for (const item of incoming[key]) {
+        if (!existingIds.has(item.id)) {
+          merged[key].push(structuredClone(item));
+          existingIds.add(item.id);
+        }
+      }
+    }
+    for (const key of ['people', 'groups', 'loanTypes', 'cards']) {
+      const existingValues = new Set(merged[key].map(value => String(value).trim().toLocaleLowerCase()));
+      for (const value of incoming[key]) {
+        const normalized = String(value).trim().toLocaleLowerCase();
+        if (normalized && !existingValues.has(normalized)) {
+          merged[key].push(value);
+          existingValues.add(normalized);
+        }
+      }
+    }
+    // Local settings win so importing a backup never overwrites existing preferences.
+    merged.settings = { ...incoming.settings, ...merged.settings };
+    return merged;
   }
 
   async function importBackup(file) {
@@ -426,12 +454,12 @@
     let backup;
     try { backup = JSON.parse(await file.text()); } catch (_) { showToast('No se pudo leer el JSON.'); return; }
     if (!validateBackup(backup)) { showToast('El archivo no es un respaldo válido de Control de préstamos.'); return; }
-    if (!window.confirm('La importación reemplazará los datos actuales de la aplicación. ¿Querés continuar?')) return;
+    if (!window.confirm('La importación incorporará los datos del respaldo a los actuales, sin reemplazarlos. Los registros duplicados se omitirán. ¿Querés continuar?')) return;
     try {
-      const restored = normalizeData(backup.data);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
-      data = restored;
-      page = 'home'; render(); showToast('Respaldo importado correctamente.');
+      const merged = mergeBackupData(data, backup.data);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      data = merged;
+      page = 'home'; render(); showToast('Respaldo incorporado; los duplicados se omitieron.');
     } catch (_) { showToast('No se pudo guardar el respaldo en este dispositivo.'); }
   }
 
