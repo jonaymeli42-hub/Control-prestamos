@@ -312,6 +312,11 @@ main { padding: 12px 0 30px; }
 :root[data-theme="dark"] .historical-section h4,
 :root[data-theme="dark"] .historical-summary > div,
 :root[data-theme="dark"] .nav-item { color: #a9b5c5; }
+:root[data-theme="dark"] .date-pill { color: #c0cada; }
+:root[data-theme="dark"] .empty-state .empty-icon { color: #a9b5c5; }
+:root[data-theme="dark"] .progress { background: #303d4f; }
+:root[data-theme="dark"] .badge.partial,
+:root[data-theme="dark"] .calendar-count { color: #c1d1ff; }
 :root[data-theme="dark"] .historical-section { border-color: #35435a; background: linear-gradient(145deg, #202b39, #202a3d); }
 :root[data-theme="dark"] .historical-eyebrow,
 :root[data-theme="dark"] .historical-row strong,
