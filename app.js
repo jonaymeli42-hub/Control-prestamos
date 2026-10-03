@@ -117,7 +117,7 @@
   function normalizedName(value) { return String(value ?? '').trim().toLocaleLowerCase('es-AR'); }
 
   function money(value) {
-    return new Intl.NumberFormat(data.settings.locale || 'es-AR', { style: 'currency', currency: data.settings.currency || 'ARS', maximumFractionDigits: 0 }).format(Number(value) || 0);
+    return new Intl.NumberFormat(data.settings.locale || 'es-AR', { style: 'currency', currency: data.settings.currency || 'ARS', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value) || 0);
   }
 
   function parseMoney(value) {
@@ -133,6 +133,16 @@
 
   function formatInterestPercent(value) {
     return new Intl.NumberFormat('es-AR', { useGrouping: false, maximumFractionDigits: 10 }).format(Number(value) || 0);
+  }
+
+  function parseMovementAmount(value) {
+    const text = String(value ?? '').trim();
+    if (!/^(?:\d+(?:[.,]\d{1,2})?|[.,]\d{1,2})$/.test(text)) return NaN;
+    return roundMoney(Number(text.replace(',', '.')));
+  }
+
+  function formatMovementAmount(value) {
+    return new Intl.NumberFormat('es-AR', { useGrouping: false, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value) || 0);
   }
 
   function parseDate(value) {
@@ -1177,12 +1187,12 @@
     const editing = Boolean(item);
     const date = item ? movementDisplayDate(item) : todayKey();
     const status = item ? (['Pendiente', 'Programado'].includes(item.status) ? 'Pendiente' : 'Realizado') : '';
-    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type"><option ${item?.type === 'Ingreso general' ? 'selected' : ''}>Ingreso general</option><option ${item?.type === 'Gasto general' ? 'selected' : ''}>Gasto general</option></select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-money-input inputmode="numeric" value="${item ? formatIntegerInput(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || '')}" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
+    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type"><option ${item?.type === 'Ingreso general' ? 'selected' : ''}>Ingreso general</option><option ${item?.type === 'Gasto general' ? 'selected' : ''}>Gasto general</option></select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-decimal-money-input inputmode="decimal" value="${item ? formatMovementAmount(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || '')}" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
     openModal(editing ? 'Editar movimiento' : 'Ingreso o gasto general', 'Los movimientos generales no se asocian a préstamos.', body);
     modalRoot.querySelector('#movement-form').addEventListener('submit', event => {
       event.preventDefault();
       const values = new FormData(event.currentTarget);
-      const amount = parseMoney(values.get('amount'));
+      const amount = parseMovementAmount(values.get('amount'));
       const date = String(values.get('date'));
       const type = String(values.get('type'));
       const description = String(values.get('description')).trim();
