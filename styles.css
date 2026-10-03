@@ -112,12 +112,15 @@ main { padding: 12px 0 30px; }
 .filter-chip.active { border-color: #cbd7ff; background: #edf2ff; color: #315fd1; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field[hidden] { display: none; }
 .field.full-span { grid-column: 1 / -1; }
 .field label { font-size: 11px; font-weight: 700; color: #526174; }
 .field input, .field select, .field textarea { width: 100%; min-height: 44px; border: 1px solid #dfe5ee; border-radius: 11px; background: #fff; padding: 10px 11px; color: var(--ink); font-size: 13px; outline: none; }
 .field textarea { min-height: 82px; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: #7c9af2; box-shadow: 0 0 0 3px #3165e81a; }
 .field-help { font-size: 10px; line-height: 1.4; color: var(--muted); }
+.historical-toggle label { display: flex; align-items: center; gap: 9px; }
+.historical-toggle input[type="checkbox"] { width: 17px; min-height: 17px; margin: 0; padding: 0; accent-color: var(--blue); flex: 0 0 auto; }
 .form-actions { display: flex; gap: 9px; margin-top: 17px; }
 .form-actions > * { flex: 1; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; background: #17233866; display: flex; align-items: flex-end; justify-content: center; padding: 20px 0 0; }
@@ -370,4 +373,5 @@ main { padding: 12px 0 30px; }
 .historical-installment-row .field label { font-size: 10px; }
 .historical-installment-row input:disabled { opacity: .55; }
 .undo-installment-payment { padding: 4px 0; }
+.installment-origin { display: block; color: var(--muted); font-size: 10px; }
 :root[data-theme="dark"] .historical-installment-row { background: #202b39; border-color: #374457; }
