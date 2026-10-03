@@ -1338,10 +1338,12 @@
     const appScope = new URL('./', document.baseURI);
     const workerUrl = new URL('sw.js', appScope);
     try {
-      return await navigator.serviceWorker.register(workerUrl.href, {
+      const registration = await navigator.serviceWorker.register(workerUrl.href, {
         scope: appScope.pathname,
         updateViaCache: 'none'
       });
+      registration.update().catch(() => {});
+      return registration;
     } catch (_) { return null; }
   }
 
