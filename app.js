@@ -87,7 +87,13 @@
     result.historical = structuredClone(HISTORICAL_TOTALS);
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(result.settings.notificationTime)) result.settings.notificationTime = INITIAL_DATA.settings.notificationTime;
     result.loans = result.loans.map(loan => ({ ...loan, disbursed: loan.disbursed !== false }));
-    result.cardFinancings = result.cardFinancings.map(financing => ({ ...financing, paid: Number(financing.paid) || 0, received: financing.received !== false }));
+    const recordedPayments = new Map();
+    result.cardPayments.forEach(payment => recordedPayments.set(payment.financingId, roundMoney((recordedPayments.get(payment.financingId) || 0) + Number(payment.amount || 0))));
+    result.cardFinancings = result.cardFinancings.map(financing => {
+      const paymentTotal = recordedPayments.get(financing.id) || 0;
+      const legacyPaid = Math.max(0, Number(financing.legacyPaid ?? (Number(financing.paid || 0) - paymentTotal)) || 0);
+      return { ...financing, paid: roundMoney(legacyPaid + paymentTotal), legacyPaid, received: financing.historical === true || financing.received !== false, historical: financing.historical === true, payments: Array.isArray(financing.payments) ? financing.payments : [] };
+    });
     if (result.cards.includes('Master Galicia mia') && !result.cards.includes('Master galicia mia')) {
       result.cards = result.cards.map(card => card === 'Master Galicia mia' ? 'Master galicia mia' : card);
     }
@@ -117,6 +123,16 @@
   function parseMoney(value) {
     const digits = String(value ?? '').replace(/\D/g, '');
     return digits ? Number(digits) : NaN;
+  }
+
+  function parseInterestPercent(value) {
+    const text = String(value ?? '').trim();
+    if (!/^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(text)) return NaN;
+    return Number(text.replace(',', '.'));
+  }
+
+  function formatInterestPercent(value) {
+    return new Intl.NumberFormat('es-AR', { useGrouping: false, maximumFractionDigits: 10 }).format(Number(value) || 0);
   }
 
   function parseDate(value) {
@@ -179,6 +195,45 @@
   }
   function financingBalance(financing) {
     return roundMoney(Math.max(0, Number(financing.totalToRepay || 0) - Number(financing.paid || 0)));
+  }
+  function syncFinancingPaid(financing) {
+    const payments = data.cardPayments.filter(item => item.financingId === financing.id);
+    if (financing.legacyPaid === undefined) {
+      const recorded = roundMoney(payments.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+      financing.legacyPaid = Math.max(0, Number(financing.paid || 0) - recorded);
+    }
+    financing.payments = payments.map(item => item.id);
+    financing.paid = roundMoney(Number(financing.legacyPaid || 0) + payments.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+  }
+  function syncFinancingReceiptMovement(financing) {
+    const linked = data.movements.filter(item => item.cardFinancingId === financing.id && item.type === 'Tarjeta recibida');
+    if (financing.historical) {
+      data.movements = data.movements.filter(item => !linked.includes(item));
+      financing.receivedMovementId = '';
+      return;
+    }
+    let movement = linked[0];
+    data.movements = data.movements.filter(item => !linked.slice(1).includes(item));
+    if (!movement) {
+      movement = { id: id(), createdAt: new Date().toISOString(), type: 'Tarjeta recibida', direction: 'in', cardFinancingId: financing.id };
+      data.movements.unshift(movement);
+    }
+    financing.receivedMovementId = movement.id;
+    Object.assign(movement, { date: financing.receivedDate, scheduledDate: financing.received ? '' : financing.receivedDate, description: `${financing.card} · Financiación recibida`, amount: financing.receivedAmount, status: financing.received ? 'Realizado' : 'Pendiente' });
+  }
+  function syncLoanDeliveryMovement(loan) {
+    const linked = data.movements.filter(item => item.loanId === loan.id && ['Préstamo dado', 'Préstamo entregado'].includes(item.type));
+    if (loan.historical) {
+      data.movements = data.movements.filter(item => !linked.includes(item));
+      return;
+    }
+    let movement = linked[0];
+    data.movements = data.movements.filter(item => !linked.slice(1).includes(item));
+    if (!movement) {
+      movement = { id: id(), createdAt: new Date().toISOString(), type: 'Préstamo dado', direction: 'out', loanId: loan.id };
+      data.movements.unshift(movement);
+    }
+    Object.assign(movement, { date: loan.deliveryDate, scheduledDate: loan.disbursed ? '' : loan.deliveryDate, person: loan.person, description: `${loan.code} · ${loan.mode}`, amount: loan.capital, status: loan.disbursed ? 'Realizado' : 'Pendiente' });
   }
   function cardDebtTotal() {
     return roundMoney(data.cardFinancings.filter(item => item.received !== false).reduce((sum, item) => sum + financingBalance(item), 0));
@@ -302,7 +357,6 @@
     const loans = data.loans.filter(loan => loanFilter === 'Todos' || loanTotals(loan).status === loanFilter);
     return `${pageHeading('Préstamos', `${data.loans.length} en total`, '')}
       <div class="filter-row">${['Todos', 'Pendiente', 'Parcial', 'Pagado'].map(filter => `<button class="filter-chip ${loanFilter === filter ? 'active' : ''}" data-action="loan-filter" data-value="${filter}">${filter}</button>`).join('')}</div>
-      <button class="secondary-button full historical-loan-entry" data-action="historical-loan">Cargar préstamo histórico</button>
       ${loans.length ? `<div class="list">${loans.map(renderLoanCard).join('')}</div>` : emptyState('▤', 'No hay préstamos', 'Usá el botón + superior para crear un préstamo.')}`;
   }
 
@@ -473,49 +527,165 @@
 
   function openConfiguredCardDetail(card) {
     const records = data.cardFinancings.filter(item => normalizedName(item.card) === normalizedName(card)).sort((a, b) => (a.nextPaymentDate || '9999-12-31').localeCompare(b.nextPaymentDate || '9999-12-31'));
+    records.forEach(item => syncFinancingPaid(item));
+    const received = records.filter(item => item.received !== false);
+    const totalReceived = roundMoney(received.reduce((sum, item) => sum + Number(item.receivedAmount || 0), 0));
+    const totalRepay = roundMoney(received.reduce((sum, item) => sum + Number(item.totalToRepay || 0), 0));
+    const totalPaid = roundMoney(received.reduce((sum, item) => sum + Number(item.paid || 0), 0));
     const pending = records.reduce((sum, item) => sum + financingBalance(item), 0);
     const upcoming = records.filter(item => item.nextPaymentDate && financingBalance(item) > 0);
-    const body = `<div class="card kv-list"><div class="kv"><span>Total pendiente</span><b>${money(pending)}</b></div><div class="kv"><span>Financiaciones</span><b>${records.length}</b></div></div><section class="section"><div class="section-head"><h3>Próximas cuotas</h3></div>${upcoming.length ? `<div class="list">${upcoming.map(item => `<article class="card"><div class="row-top"><b>${formatDate(item.nextPaymentDate)}</b><strong>${money(financingBalance(item))}</strong></div><span class="subtle">${escapeHtml(item.card)} · saldo de financiación</span></article>`).join('')}</div>` : '<p class="subtle">No hay vencimientos programados.</p>'}</section><section class="section"><div class="section-head"><h3>Financiamientos asociados</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : '<p class="subtle">No hay financiaciones asociadas a esta tarjeta.</p>'}</section>`;
+    const body = `<div class="card kv-list"><div class="kv"><span>Total recibido</span><b>${money(totalReceived)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(totalRepay)}</b></div><div class="kv"><span>Total pagado</span><b>${money(totalPaid)}</b></div><div class="kv"><span>Total pendiente</span><b>${money(pending)}</b></div><div class="kv"><span>Financiaciones</span><b>${records.length}</b></div></div><section class="section"><div class="section-head"><h3>Próximas cuotas</h3></div>${upcoming.length ? `<div class="list">${upcoming.map(item => `<article class="card"><div class="row-top"><b>${formatDate(item.nextPaymentDate)}</b><strong>${money(financingBalance(item))}</strong></div><span class="subtle">${escapeHtml(item.card)} · saldo de financiación</span></article>`).join('')}</div>` : '<p class="subtle">No hay vencimientos programados.</p>'}</section><section class="section"><div class="section-head"><h3>Financiaciones asociadas</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : '<p class="subtle">No hay financiaciones asociadas a esta tarjeta.</p>'}</section>`;
     openModal(card, 'Resumen de tarjeta', body);
   }
 
   function renderFinancingCard(financing) {
+    syncFinancingPaid(financing);
     const balance = financingBalance(financing);
     const status = financing.received === false ? 'Programada' : balance <= 0.005 ? 'Pagada' : financing.paid > 0 ? 'Parcial' : 'Pendiente';
     const badgeClass = status === 'Pagada' ? 'paid' : status === 'Parcial' ? 'partial' : 'pending';
-    return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
+    return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.historical ? 'Histórica · recibida' : financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago previsto: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
   }
 
-  function openFinancingForm() {
-    const cardOptions = data.cards.length ? data.cards : ['Otra'];
-    const body = `<form id="financing-form"><div class="form-grid"><div class="field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}">${escapeHtml(card)}</option>`).join('')}</select></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${todayKey()}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" required></div><div class="field"><label for="financing-charges">Intereses / cargos</label><input id="financing-charges" name="charges" type="text" data-money-input inputmode="numeric" value="0" required></div><div class="field full-span"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" min="${todayKey()}"></div></div><p class="field-help">El dinero recibido actualiza el saldo disponible. Los cargos se suman a la deuda, no al dinero recibido.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar financiación</button></div></form>`;
-    openModal('Nueva financiación', 'Registrá cuánto recibiste y cuánto debés devolver.', body);
-    modalRoot.querySelector('#financing-form').addEventListener('submit', saveFinancing);
+  function openFinancingForm(financingId = '') {
+    const existing = financingId ? data.cardFinancings.find(item => item.id === financingId) : null;
+    if (financingId && !existing) return;
+    const cardOptions = [...new Set([...(data.cards.length ? data.cards : ['Otra']), ...(existing ? [existing.card] : [])])];
+    const interestType = existing?.interestType || 'amount';
+    const interestValue = existing ? (existing.interestValue ?? existing.charges ?? 0) : 0;
+    const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
+    openModal(existing ? 'Editar financiación' : 'Nueva financiación', existing ? existing.card : 'Registrá cuánto recibiste y cuánto debés devolver.', body);
+    const form = modalRoot.querySelector('#financing-form');
+    form.addEventListener('submit', saveFinancing);
+    const type = form.elements.interestType;
+    const value = form.elements.interestValue;
+    const amount = form.elements.receivedAmount;
+    const preview = () => {
+      const base = parseMoney(amount.value);
+      const rate = parseInterestPercent(value.value);
+      const interest = type.value === 'percent' ? (Number.isFinite(rate) ? roundMoney(base * Math.max(0, rate) / 100) : NaN) : parseMoney(value.value);
+      modalRoot.querySelector('#financing-interest-preview').textContent = `Intereses/cargos: ${money(interest)} · Total: ${money(roundMoney(base + interest))}`;
+      modalRoot.querySelector('#financing-charges-preview').textContent = money(interest);
+      modalRoot.querySelector('#financing-total-preview').textContent = money(roundMoney(base + interest));
+    };
+    type.addEventListener('change', () => {
+      const previousType = type.dataset.previous || type.value;
+      const base = parseMoney(amount.value);
+      const previousValue = previousType === 'percent' ? Math.max(0, parseInterestPercent(value.value) || 0) : parseMoney(value.value);
+      if (type.value !== previousType) {
+        const charges = previousType === 'percent' ? roundMoney(base * previousValue / 100) : previousValue;
+        value.value = type.value === 'percent' ? formatInterestPercent(base ? charges * 100 / base : 0) : formatIntegerInput(charges);
+        type.dataset.previous = type.value;
+        value.type = 'text';
+        value.inputMode = type.value === 'percent' ? 'decimal' : 'numeric';
+        value.toggleAttribute('data-money-input', type.value === 'amount');
+      }
+      preview();
+    });
+    type.dataset.previous = type.value;
+    [value, amount].forEach(input => input.addEventListener('input', preview));
+    preview();
   }
 
   function saveFinancing(event) {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const existing = data.cardFinancings.find(item => item.id === form.dataset.financingId);
+    if (existing) syncFinancingPaid(existing);
     const receivedAmount = parseMoney(values.get('receivedAmount'));
-    const charges = parseMoney(values.get('charges'));
+    const interestType = String(values.get('interestType')) === 'percent' ? 'percent' : 'amount';
+    const interestValue = interestType === 'percent' ? parseInterestPercent(values.get('interestValue')) : parseMoney(values.get('interestValue'));
+    const charges = roundMoney(interestType === 'percent' ? receivedAmount * interestValue / 100 : interestValue);
     const receivedDate = String(values.get('receivedDate'));
     const nextPaymentDate = String(values.get('nextPaymentDate'));
-    if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(charges) || charges < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto y las fechas de la financiación.'); return; }
-    const financing = { id: id(), card: String(values.get('card')), receivedDate, receivedAmount, charges, totalToRepay: roundMoney(receivedAmount + charges), paid: 0, nextPaymentDate, received: receivedDate <= todayKey(), createdAt: new Date().toISOString(), payments: [] };
-    data.cardFinancings.unshift(financing);
-    const movement = { id: id(), date: receivedDate, scheduledDate: financing.received ? '' : receivedDate, createdAt: new Date().toISOString(), type: 'Tarjeta recibida', description: `${financing.card} · Financiación recibida`, direction: 'in', amount: receivedAmount, cardFinancingId: financing.id, status: financing.received ? 'Realizado' : 'Pendiente' };
-    financing.receivedMovementId = movement.id;
-    data.movements.unshift(movement);
-    persist(); closeModal(); page = 'cards'; render(); showToast(financing.received ? 'Financiación registrada y dinero sumado.' : 'Financiación programada para una fecha futura.');
+    if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(interestValue) || interestValue < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto, los intereses y las fechas de la financiación.'); return; }
+    if (existing && existing.paid > roundMoney(receivedAmount + charges) + 0.005) { showToast('El total a devolver no puede ser menor que los pagos ya registrados.'); return; }
+    const financing = existing || { id: id(), paid: 0, legacyPaid: 0, createdAt: new Date().toISOString(), payments: [] };
+    const historical = values.get('historical') === 'on';
+    Object.assign(financing, { card: String(values.get('card')), receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
+    syncFinancingPaid(financing);
+    if (!existing) data.cardFinancings.unshift(financing);
+    syncFinancingReceiptMovement(financing);
+    persist(); closeModal(); page = 'cards'; render(); showToast(financing.historical ? 'Financiación histórica guardada; la deuda quedó registrada.' : existing ? 'Financiación actualizada y saldos recalculados.' : 'Financiación registrada y dinero sumado.');
   }
 
   function openFinancingDetail(financingId) {
     const financing = data.cardFinancings.find(item => item.id === financingId);
     if (!financing) return;
-    const payments = data.cardPayments.filter(item => item.financingId === financing.id).sort((a, b) => b.date.localeCompare(a.date));
-    const history = payments.length ? `<div class="list">${payments.map(payment => `<div class="card"><div class="row"><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })}</b><strong>${money(payment.amount)}</strong></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}</div>`).join('')}</div>` : '<p class="subtle">Todavía no hay pagos.</p>';
+    syncFinancingPaid(financing);
+    const chronological = data.cardPayments.filter(item => item.financingId === financing.id).sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    let runningPaid = 0;
+    const balances = new Map();
+    chronological.forEach(payment => { runningPaid = roundMoney(runningPaid + Number(payment.amount || 0)); balances.set(payment.id, Math.max(0, roundMoney(financing.totalToRepay - Number(financing.legacyPaid || 0) - runningPaid))); });
+    const payments = chronological.slice().reverse();
+    const legacyHistory = Number(financing.legacyPaid || 0) > 0 ? `<article class="card payment-history-row"><b>Pagado antes del historial detallado</b><strong>${money(financing.legacyPaid)}</strong><div class="subtle">El respaldo anterior no incluye fechas ni pagos individuales para este importe.</div></article>` : '';
+    const history = payments.length || legacyHistory ? `<div class="list">${legacyHistory}${payments.map(payment => `<article class="card payment-history-row"><div class="row-top"><span><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })}</b><small>Fecha real del pago</small></span><strong>${money(payment.amount)}</strong></div><div class="subtle">Saldo después del pago: <b>${money(balances.get(payment.id))}</b></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}<div class="payment-actions"><button class="secondary-button" data-action="edit-card-payment" data-id="${escapeHtml(payment.id)}">Editar</button><button class="danger-button" data-action="delete-card-payment" data-id="${escapeHtml(payment.id)}">Eliminar</button></div></article>`).join('')}</div>` : '<p class="subtle">Todavía no hay pagos.</p>';
     const controls = financing.received !== false && financingBalance(financing) > 0.005 ? `<div class="form-actions"><button class="secondary-button" data-action="schedule-card-payment" data-id="${escapeHtml(financing.id)}">Programar fecha</button><button class="primary-button" data-action="pay-card" data-id="${escapeHtml(financing.id)}">Registrar pago</button></div>` : '';
-    openModal(financing.card, 'Detalle de financiación', `<div class="card kv-list"><div class="kv"><span>Fecha recibida</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div>${controls}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
+    const admin = `<div class="loan-detail-actions"><button class="secondary-button" data-action="edit-financing" data-id="${escapeHtml(financing.id)}">Editar</button><button class="danger-button" data-action="delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`;
+    openModal(financing.card, 'Detalle de financiación', `${admin}<div class="card kv-list"><div class="kv"><span>Fecha en que recibí el dinero</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div><div class="kv"><span>Próxima fecha prevista</span><b>${financing.nextPaymentDate ? formatDate(financing.nextPaymentDate) : 'Sin fecha'}</b></div><div class="kv"><span>Tipo</span><b>${financing.historical ? 'Histórica' : 'Normal'}</b></div></div>${controls}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
+  }
+
+  function openDeleteFinancing(financingId) {
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    if (!financing) return;
+    syncFinancingPaid(financing);
+    openModal('¿Eliminar financiación?', 'Se quitarán también sus pagos y movimientos vinculados.', `<div class="card kv-list"><div class="kv"><span>Tarjeta</span><b>${escapeHtml(financing.card)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><div class="form-actions"><button class="secondary-button" data-action="close-modal">Cancelar</button><button class="danger-button" data-action="confirm-delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`);
+  }
+
+  function deleteFinancing(financingId) {
+    const financing = data.cardFinancings.find(item => item.id === financingId);
+    if (!financing) return;
+    const paymentIds = new Set(data.cardPayments.filter(item => item.financingId === financingId).map(item => item.id));
+    data.cardFinancings = data.cardFinancings.filter(item => item.id !== financingId);
+    data.cardPayments = data.cardPayments.filter(item => item.financingId !== financingId);
+    data.movements = data.movements.filter(item => item.cardFinancingId !== financingId && !paymentIds.has(item.cardPaymentId));
+    persist(); closeModal(); render(); showToast('Financiación, pagos y movimientos vinculados eliminados.');
+  }
+
+  function openCardPaymentEdit(paymentId) {
+    const payment = data.cardPayments.find(item => item.id === paymentId);
+    if (!payment) return;
+    const financing = data.cardFinancings.find(item => item.id === payment.financingId);
+    if (!financing) return;
+    syncFinancingPaid(financing);
+    const otherPaid = roundMoney(financing.paid - Number(payment.amount || 0));
+    const maximum = roundMoney(financing.totalToRepay - otherPaid);
+    const legacyFraction = !Number.isInteger(Number(payment.amount)) || !Number.isInteger(maximum);
+    const amountField = legacyFraction
+      ? `<input id="card-payment-edit-amount" name="amount" type="number" data-legacy-fraction="true" min="0.01" max="${maximum}" step="0.01" value="${Number(payment.amount)}" required>`
+      : `<input id="card-payment-edit-amount" name="amount" type="text" data-money-input inputmode="numeric" value="${formatIntegerInput(payment.amount)}" required>`;
+    const body = `<form id="card-payment-edit-form" data-payment-id="${escapeHtml(payment.id)}"><div class="form-grid"><div class="field"><label for="card-payment-edit-amount">Monto pagado</label>${amountField}<span class="field-help">Máximo disponible: ${money(maximum)}</span></div><div class="field"><label for="card-payment-edit-date">Fecha real del pago</label><input id="card-payment-edit-date" name="date" type="date" value="${escapeHtml(payment.date)}" max="${todayKey()}" required></div><div class="field full-span"><label for="card-payment-edit-note">Descripción (opcional)</label><input id="card-payment-edit-note" name="note" maxlength="300" value="${escapeHtml(payment.note || '')}"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar cambios</button></div></form>`;
+    openModal('Editar pago', financing.card, body);
+    modalRoot.querySelector('#card-payment-edit-form').addEventListener('submit', event => saveCardPaymentEdit(event, payment.id));
+  }
+
+  function saveCardPaymentEdit(event, paymentId) {
+    event.preventDefault();
+    const payment = data.cardPayments.find(item => item.id === paymentId);
+    const financing = payment && data.cardFinancings.find(item => item.id === payment.financingId);
+    if (!payment || !financing) return;
+    syncFinancingPaid(financing);
+    const maximum = roundMoney(financing.totalToRepay - (financing.paid - Number(payment.amount || 0)));
+    const values = new FormData(event.currentTarget);
+    const amount = event.currentTarget.elements.amount.dataset.legacyFraction === 'true' ? roundMoney(Number(values.get('amount'))) : parseMoney(values.get('amount'));
+    const date = String(values.get('date'));
+    if (!Number.isFinite(amount) || amount <= 0 || amount > maximum + 0.005 || !parseDate(date) || date > todayKey()) { showToast('El pago debe ser válido y no superar el saldo disponible.'); return; }
+    payment.amount = amount; payment.date = date; payment.note = String(values.get('note')).trim();
+    const movement = data.movements.find(item => item.cardPaymentId === payment.id);
+    if (movement) { movement.amount = amount; movement.date = date; movement.description = `${financing.card} · Pago de financiación`; }
+    syncFinancingPaid(financing); persist(); openFinancingDetail(financing.id); showToast('Pago actualizado; los saldos se recalcularon.');
+  }
+
+  function deleteCardPayment(paymentId) {
+    const payment = data.cardPayments.find(item => item.id === paymentId);
+    if (!payment || !window.confirm(`¿Eliminar el pago de ${money(payment.amount)} del ${formatDate(payment.date)}? La deuda pendiente volverá a aumentar por ese importe.`)) return;
+    const financing = data.cardFinancings.find(item => item.id === payment.financingId);
+    if (financing) syncFinancingPaid(financing);
+    data.cardPayments = data.cardPayments.filter(item => item.id !== paymentId);
+    data.movements = data.movements.filter(item => item.cardPaymentId !== paymentId);
+    if (financing) { syncFinancingPaid(financing); persist(); openFinancingDetail(financing.id); }
+    else { persist(); closeModal(); render(); }
+    showToast('Pago eliminado; la deuda pendiente se recalculó.');
   }
 
   function openCardPaymentForm(financingId) {
@@ -537,7 +707,9 @@
     const values = new FormData(event.currentTarget);
     const amount = event.currentTarget.elements.amount.dataset.legacyFraction === 'true' ? roundMoney(Number(values.get('amount'))) : parseMoney(values.get('amount'));
     const date = String(values.get('date'));
-    if (!financing || !Number.isFinite(amount) || amount <= 0 || amount > financingBalance(financing) + 0.005 || !parseDate(date) || date > todayKey()) { showToast('El pago debe ser válido y no superar el saldo pendiente.'); return; }
+    if (!financing) return;
+    syncFinancingPaid(financing);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > financingBalance(financing) + 0.005 || !parseDate(date) || date > todayKey()) { showToast('El pago debe ser válido y no superar el saldo pendiente.'); return; }
     const payment = { id: id(), financingId, card: financing.card, amount, date, note: String(values.get('note')).trim(), createdAt: new Date().toISOString() };
     financing.paid = roundMoney(financing.paid + amount);
     financing.payments ||= [];
@@ -545,7 +717,7 @@
     financing.nextPaymentDate = '';
     data.cardPayments.unshift(payment);
     data.movements.unshift({ id: id(), date, createdAt: payment.createdAt, type: 'Tarjeta pagada', description: `${financing.card} · Pago de financiación`, direction: 'out', amount, cardFinancingId: financing.id, cardPaymentId: payment.id, status: 'Realizado' });
-    persist(); closeModal(); render(); showToast('Pago registrado; se actualizó el saldo pendiente.');
+    syncFinancingPaid(financing); persist(); closeModal(); render(); showToast('Pago registrado; se actualizó el saldo pendiente.');
   }
 
   function openCardScheduleForm(financingId) {
@@ -607,14 +779,15 @@
       <div class="field"><label for="loan-count">Cantidad de cuotas</label><input id="loan-count" name="count" type="number" min="1" max="240" step="1" value="${escapeHtml(existing?.count || 1)}" required></div>
       <div class="field"><label for="loan-delivery-date">Fecha de entrega</label><input id="loan-delivery-date" name="deliveryDate" type="date" value="${escapeHtml(deliveryDate)}" required><span class="field-help">Una fecha futura deja el préstamo programado.</span></div>
       <div class="field"><label for="loan-first-due">Primer vencimiento</label><input id="loan-first-due" name="firstDue" type="date" value="${escapeHtml(firstDue)}" required></div>
-      ${existing ? '' : `<div class="field full-span historical-toggle"><label for="loan-historical"><input id="loan-historical" name="historical" type="checkbox"> Préstamo ya iniciado / histórico</label><span class="field-help">Activá esta opción si el préstamo ya existía antes de usar la aplicación. Las cuotas anteriores quedarán pagadas sin crear cobros ni movimientos.</span></div><div class="field full-span" id="loan-historical-paid-field" hidden><label for="loan-historical-paid-count">Cuotas ya pagadas antes de usar la aplicación</label><input id="loan-historical-paid-count" name="historicalPaidCount" type="number" min="0" max="240" step="1" value="0" disabled><span class="field-help">Se marcarán como históricas las primeras cuotas del cronograma.</span></div>`}
+      <div class="field full-span historical-toggle"><label for="loan-historical"><input id="loan-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Préstamo histórico</label><span class="field-help">No descuenta el capital del dinero actual ni genera un movimiento de entrega. Los pagos y cuotas existentes se conservan.</span></div>
+      ${existing ? '' : `<div class="field full-span" id="loan-historical-paid-field" hidden><label for="loan-historical-paid-count">Cuotas ya pagadas antes de usar la aplicación</label><input id="loan-historical-paid-count" name="historicalPaidCount" type="number" min="0" max="240" step="1" value="0" disabled><span class="field-help">Se marcarán como históricas las primeras cuotas del cronograma.</span></div>`}
       <div class="field full-span"><label for="loan-notes">Descripción</label><textarea id="loan-notes" name="notes" maxlength="1000" placeholder="Detalle opcional">${escapeHtml(existing?.notes || '')}</textarea></div>
       </div><p class="field-help">En cuotas normales, la tasa es mensual y se calcula por la cantidad de meses. En interés mensual + capital final se cobra el interés mensual y el capital al final.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar préstamo'}</button></div></form>`;
     openModal(existing ? `Editar préstamo ${existing.code}` : 'Agregar préstamo', existing ? existing.person : 'Completá los datos y generaremos las cuotas.', body);
     const form = modalRoot.querySelector('#loan-form');
     form.addEventListener('submit', saveLoan);
     const historicalToggle = form.elements.historical;
-    if (historicalToggle) {
+    if (historicalToggle && form.elements.historicalPaidCount) {
       const historicalPaidField = form.querySelector('#loan-historical-paid-field');
       const historicalPaidCount = form.elements.historicalPaidCount;
       const updateHistoricalFields = () => {
@@ -661,22 +834,26 @@
     }).join('');
   }
 
-  function openHistoricalLoanForm() {
-    const body = `<form id="historical-loan-form"><div class="alert">Este registro conserva los importes y vencimientos que cargues. No descuenta el capital del dinero actual ni genera movimientos o ingresos por cuotas ya cobradas.</div><div class="form-grid">
-      <div class="field"><label for="historical-code">Código / referencia</label><input id="historical-code" name="code" maxlength="40" placeholder="Ej. H80"></div>
-      <div class="field"><label for="historical-person">Persona</label><input id="historical-person" name="person" list="historical-people-list" required maxlength="80" placeholder="Nombre"><datalist id="historical-people-list">${data.people.map(person => `<option value="${escapeHtml(person)}">`).join('')}</datalist></div>
-      <div class="field"><label for="historical-mode">Modalidad</label><select id="historical-mode" name="mode" required>${data.loanTypes.map((type, index) => `<option value="${escapeHtml(type)}" ${index === 1 ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>
-      <div class="field"><label for="historical-capital">Capital originalmente prestado</label><input id="historical-capital" name="capital" type="text" data-money-input inputmode="numeric" required placeholder="Ej. 2.000.000"></div>
-      <div class="field"><label for="historical-rate">Interés / tasa original (%)</label><input id="historical-rate" name="rate" type="number" min="0" step="0.01" inputmode="decimal" value="0" required></div>
-      <div class="field"><label for="historical-delivery-date">Fecha original del préstamo</label><input id="historical-delivery-date" name="deliveryDate" type="date" required></div>
-      <div class="field"><label for="historical-count">Cantidad de cuotas</label><input id="historical-count" name="count" type="number" min="1" max="240" step="1" value="1" required></div>
-      </div><p class="field-help">Ingresá los importes, vencimientos y estados reales de cada cuota. No se recalcularán con una fórmula nueva.</p><div id="historical-installments" class="historical-installments"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar préstamo histórico</button></div></form>`;
-    openModal('Cargar préstamo histórico', 'Cuotas anteriores a la aplicación', body);
+  function openHistoricalLoanForm(loanId = '') {
+    const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
+    if (loanId && !existing) return;
+    const existingRows = existing ? loanInstallments(existing.id).sort((a, b) => a.number - b.number).map(item => ({ dueDate: item.dueDate, amount: formatIntegerInput(item.amount), state: Number(item.paid) >= Number(item.amount) ? 'paid' : Number(item.paid) > 0 ? 'partial' : 'pending', paid: formatIntegerInput(item.paid) })) : [];
+    const body = `<form id="historical-loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="alert">Este registro conserva los importes y vencimientos reales de cada cuota.</div><div class="form-grid">
+      <div class="field"><label for="historical-code">Código / referencia</label><input id="historical-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80"></div>
+      <div class="field"><label for="historical-person">Persona</label><input id="historical-person" name="person" value="${escapeHtml(existing?.person || '')}" list="historical-people-list" required maxlength="80" placeholder="Nombre"><datalist id="historical-people-list">${data.people.map(person => `<option value="${escapeHtml(person)}">`).join('')}</datalist></div>
+      <div class="field"><label for="historical-mode">Modalidad</label><select id="historical-mode" name="mode" required>${data.loanTypes.map((type, index) => `<option value="${escapeHtml(type)}" ${type === (existing?.mode || data.loanTypes[1] || data.loanTypes[0]) ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>
+      <div class="field"><label for="historical-capital">Capital originalmente prestado</label><input id="historical-capital" name="capital" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.capital) : ''}" required placeholder="Ej. 2.000.000"></div>
+      <div class="field"><label for="historical-rate">Interés / tasa original (%)</label><input id="historical-rate" name="rate" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeHtml(existing?.rate ?? 0)}" required></div>
+      <div class="field"><label for="historical-delivery-date">Fecha original del préstamo</label><input id="historical-delivery-date" name="deliveryDate" type="date" value="${escapeHtml(existing?.deliveryDate || todayKey())}" required></div>
+      <div class="field"><label for="historical-count">Cantidad de cuotas</label><input id="historical-count" name="count" type="number" min="1" max="240" step="1" value="${escapeHtml(existing?.count || 1)}" required></div>
+      <div class="field full-span historical-toggle"><label for="historical-loan-flag"><input id="historical-loan-flag" name="historical" type="checkbox" ${existing?.historical !== false ? 'checked' : ''}> Préstamo histórico</label><span class="field-help">Si lo desmarcás, se crea el movimiento normal de entrega. Se conservan cuotas y pagos.</span></div>
+      </div><p class="field-help">Ingresá los importes, vencimientos y estados reales de cada cuota. Los pagos registrados en la aplicación se conservarán.</p><div id="historical-installments" class="historical-installments"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar cambios</button></div></form>`;
+    openModal(existing ? `Editar préstamo ${existing.code}` : 'Nuevo préstamo histórico', existing ? existing.person : 'Cuotas anteriores a la aplicación', body);
     const form = modalRoot.querySelector('#historical-loan-form');
-    form.elements.deliveryDate.value = todayKey();
+    if (existingRows.length) renderHistoricalInstallmentRows(form, existingRows);
     form.dataset.defaultsDeliveryDate = form.elements.deliveryDate.value;
     form.dataset.defaultsMode = form.elements.mode.value;
-    renderHistoricalInstallmentRows(form);
+    if (!existingRows.length) renderHistoricalInstallmentRows(form);
     const refreshRows = () => {
       const previous = historicalRowsFromForm(form);
       const oldDelivery = form.dataset.defaultsDeliveryDate;
@@ -715,21 +892,27 @@
     if (!person || !Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || deliveryDate > todayKey() || !parseDate(deliveryDate) || !Number.isInteger(count) || count < 1 || count > 240 || rows.length !== count) {
       showToast('Revisá persona, capital, fecha original y cantidad de cuotas.'); return;
     }
+    const loanId = form.dataset.loanId || '';
+    const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
+    const oldRows = existing ? loanInstallments(existing.id) : [];
     const installments = [];
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const amount = parseMoney(row.amount);
       const paidInput = parseMoney(row.paid);
-      const paid = row.state === 'paid' ? amount : row.state === 'partial' ? paidInput : 0;
+      let paid = row.state === 'paid' ? amount : row.state === 'partial' ? paidInput : 0;
+      const old = oldRows.find(item => item.number === index + 1);
+      const paidInApp = old ? Math.max(0, Number(old.paid || 0) - Number(old.paidBeforeApp || 0)) : 0;
+      if (paid + 0.005 < paidInApp || amount + 0.005 < Number(old?.paid || 0)) { showToast(`La cuota ${index + 1} no puede quedar por debajo de sus pagos registrados.`); return; }
+      paid = Math.max(paid, paidInApp);
       if (!parseDate(row.dueDate) || row.dueDate < deliveryDate || !Number.isFinite(amount) || amount <= 0 || !['pending', 'paid', 'partial'].includes(row.state) || (row.state === 'partial' && (!Number.isFinite(paidInput) || paidInput <= 0 || paidInput >= amount))) {
         showToast(`Revisá el importe, vencimiento y estado de la cuota ${index + 1}.`); return;
       }
-      installments.push({ id: id(), number: index + 1, dueDate: row.dueDate, amount, paid, paidBeforeApp: paid, status: paid >= amount ? 'Pagado' : paid > 0 ? 'Parcial' : 'Pendiente', payments: [] });
+      installments.push({ ...(old || {}), id: old?.id || id(), number: index + 1, dueDate: row.dueDate, amount, paid, paidBeforeApp: old ? Math.min(Number(old.paidBeforeApp) || 0, paid) : paid, status: paid >= amount ? 'Pagado' : paid > 0 ? 'Parcial' : 'Pendiente', payments: old?.payments || [] });
     }
-    const loanId = id();
     const loan = {
-      id: loanId,
-      code: String(values.get('code') || '').trim() || `HIST-${String(data.loans.filter(item => item.historical).length + 1).padStart(3, '0')}`,
+      ...(existing || {}), id: loanId || id(),
+      code: String(values.get('code') || '').trim() || existing?.code || `HIST-${String(data.loans.filter(item => item.historical).length + 1).padStart(3, '0')}`,
       person,
       mode: String(values.get('mode')),
       capital: Math.round(capital),
@@ -737,15 +920,26 @@
       rateRecorded: true,
       count,
       firstDue: installments[0].dueDate,
-      notes: 'Préstamo histórico/migrado',
-      createdAt: new Date().toISOString(),
+      notes: existing?.notes || 'Préstamo histórico/migrado',
+      createdAt: existing?.createdAt || new Date().toISOString(),
       deliveryDate,
       disbursed: true,
-      historical: true
+      historical: values.get('historical') === 'on'
     };
-    data.loans.unshift(loan);
-    data.installments.push(...installments.map(item => ({ ...item, loanId })));
-    persist(); closeModal(); page = 'loans'; loanFilter = 'Todos'; render(); showToast('Préstamo histórico guardado sin crear movimientos.');
+    if (existing) {
+      const requestedCount = count;
+      for (const old of oldRows.filter(item => item.number > requestedCount)) {
+        if (Number(old.paid) > 0 || data.collections.some(item => item.installmentId === old.id) || (old.payments || []).length) { showToast(`No se puede quitar la cuota ${old.number} porque tiene pagos vinculados.`); return; }
+      }
+      data.installments = data.installments.filter(item => item.loanId !== existing.id || item.number <= requestedCount);
+      installments.forEach(item => { item.loanId = existing.id; const index = data.installments.findIndex(row => row.id === item.id); if (index >= 0) data.installments[index] = item; else data.installments.push(item); });
+      Object.assign(existing, loan);
+      syncLoanDeliveryMovement(existing);
+    } else {
+      data.loans.unshift(loan);
+      data.installments.push(...installments.map(item => ({ ...item, loanId: loan.id })));
+    }
+    persist(); closeModal(); page = 'loans'; loanFilter = 'Todos'; render(); showToast(existing ? 'Préstamo actualizado; cuotas y pagos conservados.' : 'Préstamo histórico guardado sin crear movimientos.');
   }
 
   function calculateSchedule({ capital, rate, count, mode, firstDue }) {
@@ -827,8 +1021,8 @@
     const mode = String(form.get('mode'));
     const firstDue = String(form.get('firstDue'));
     const deliveryDate = String(form.get('deliveryDate') || todayKey());
-    const historical = !existing && event.currentTarget.elements.historical?.checked === true;
-    const historicalPaidCount = historical ? Number(form.get('historicalPaidCount')) : 0;
+    const historical = event.currentTarget.elements.historical?.checked === true;
+    const historicalPaidCount = historical && !existing ? Number(form.get('historicalPaidCount')) : Number(existing?.historicalPaidCount) || 0;
     const scheduleCount = mode === '1 cuota' ? 1 : count;
     if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate)) {
       showToast('Revisá capital, tasa, cuotas y vencimiento.'); return;
@@ -844,7 +1038,7 @@
       firstDueManual: event.currentTarget.elements.firstDue.dataset.manual === 'true',
       notes: String(form.get('notes')).trim(), createdAt: existing?.createdAt || new Date().toISOString(), deliveryDate,
       disbursed: historical ? true : existing ? (existing.disbursed !== false || deliveryDate <= todayKey()) : deliveryDate <= todayKey(),
-      ...(historical ? { historical: true, rateRecorded: true, historicalPaidCount } : {})
+      historical, rateRecorded: historical ? true : existing?.rateRecorded || false, historicalPaidCount
     };
     if (existing) {
       const affectsSchedule = ['capital', 'rate', 'count', 'mode', 'firstDue'].some(key => String(existing[key] ?? '') !== String(loan[key] ?? ''));
@@ -852,18 +1046,8 @@
         const result = reconcileInstallments(existing, loan);
         if (result.error) { showToast(result.error); return; }
       }
-      const deliveryMovement = data.movements.find(item => item.loanId === existing.id && ['Préstamo dado', 'Préstamo entregado'].includes(item.type));
-      if (deliveryMovement) {
-        deliveryMovement.amount = loan.capital;
-        deliveryMovement.person = loan.person;
-        deliveryMovement.description = `${loan.code} · ${loan.mode}`;
-        if (existing.deliveryDate !== loan.deliveryDate) {
-          deliveryMovement.date = loan.deliveryDate;
-          deliveryMovement.scheduledDate = loan.disbursed ? '' : loan.deliveryDate;
-          deliveryMovement.status = loan.disbursed ? 'Realizado' : 'Pendiente';
-        }
-      }
       Object.assign(existing, loan);
+      syncLoanDeliveryMovement(existing);
       persist(); closeModal(); page = 'loans'; render(); showToast('Préstamo actualizado; los pagos existentes se conservaron.');
       return;
     }
@@ -874,7 +1058,7 @@
     }));
     data.loans.unshift(loan);
     data.installments.push(...schedule);
-    if (!historical) data.movements.unshift({ id: id(), date: deliveryDate, scheduledDate: loan.disbursed ? '' : deliveryDate, createdAt: new Date().toISOString(), type: 'Préstamo dado', person, description: `${loan.code} · ${loan.mode}`, direction: 'out', amount: loan.capital, loanId: loan.id, status: loan.disbursed ? 'Realizado' : 'Pendiente' });
+    if (!historical) syncLoanDeliveryMovement(loan);
     persist(); closeModal(); page = 'loans'; render(); showToast(historical ? `Préstamo histórico guardado: ${historicalPaidCount} cuota(s) ya pagada(s).` : 'Préstamo y cuotas creados.');
   }
 
@@ -901,7 +1085,7 @@
         ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : '';
       return `<div class="installment-line ${paid ? 'installment-paid' : 'installment-pending'}"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span class="badge ${stateClass}">${paid ? 'Pagada' : item.dueDate < todayKey() ? 'Vencida' : item.paid > 0 ? 'Parcial' : 'Pendiente'}</span><span>Importe ${money(item.amount)} · Pagado ${money(item.paid)}</span>${historicalPaid > 0.005 ? `<small class="installment-origin">Pago histórico anterior a la aplicación: ${money(historicalPaid)}</small>` : ''}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${undoButton}${collectButton}</div></div>`;
     }).join('');
-    const toolbar = `<div class="loan-detail-actions">${loan.historical ? '<span class="badge partial">Histórico / migrado</span>' : `<button class="secondary-button" data-action="edit-loan" data-id="${escapeHtml(loan.id)}">Editar</button>`}<button class="danger-button" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar</button></div>`;
+    const toolbar = `<div class="loan-detail-actions"><span class="badge ${loan.historical ? 'partial' : 'paid'}">${loan.historical ? 'Histórico' : 'Normal'}</span><button class="secondary-button" data-action="edit-loan" data-id="${escapeHtml(loan.id)}">Editar</button><button class="danger-button" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar</button></div>`;
     const duplicateWarning = repeatedNumbers.length ? `<div class="alert">Se detectaron cuotas repetidas (${repeatedNumbers.join(', ')}). No se fusionaron ni eliminaron porque pueden tener pagos vinculados. Revisá el historial antes de recalcular.</div>` : '';
     openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${history}`);
   }
@@ -1234,10 +1418,9 @@
     if (!button) return;
     const action = button.dataset.action;
     if (action === 'new-loan') openLoanForm();
-    else if (action === 'historical-loan') openHistoricalLoanForm();
     else if (action === 'close-modal') closeModal();
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
-    else if (action === 'edit-loan') openLoanForm(button.dataset.id);
+    else if (action === 'edit-loan') { const loan = data.loans.find(item => item.id === button.dataset.id); if (loan?.historical) openHistoricalLoanForm(button.dataset.id); else openLoanForm(button.dataset.id); }
     else if (action === 'view-loan') openLoanDetail(button.dataset.id);
     else if (action === 'card-detail') openConfiguredCardDetail(button.dataset.card);
     else if (action === 'toggle-projection') { projectionExpanded = !projectionExpanded; render(); }
@@ -1269,6 +1452,11 @@
     else if (action === 'new-movement') openMovementForm();
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
+    else if (action === 'edit-financing') openFinancingForm(button.dataset.id);
+    else if (action === 'delete-financing') openDeleteFinancing(button.dataset.id);
+    else if (action === 'confirm-delete-financing') deleteFinancing(button.dataset.id);
+    else if (action === 'edit-card-payment') openCardPaymentEdit(button.dataset.id);
+    else if (action === 'delete-card-payment') deleteCardPayment(button.dataset.id);
     else if (action === 'pay-card') openCardPaymentForm(button.dataset.id);
     else if (action === 'schedule-card-payment') openCardScheduleForm(button.dataset.id);
     else if (action === 'movement-detail') openMovementDetail(button.dataset.id);

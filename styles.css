@@ -364,8 +364,6 @@ main { padding: 12px 0 30px; }
 :root[data-theme="dark"] .calendar-day.has-due.overdue-dot::after { background: #ff8c86; }
 :root[data-theme="dark"] .calendar-day.has-due.paid-dot::after { background: #62d3a2; }
 :root[data-theme="dark"] .calendar-day.has-due::after { background: #f2bd6c; }
-:root[data-theme="dark"] .historical-loan-entry { color: #d5deea; }
-.historical-loan-entry { margin: 0 0 13px; }
 .historical-installments { display: grid; gap: 10px; margin-top: 14px; }
 .historical-installment-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); }
 .historical-installment-row > strong { grid-column: 1 / -1; font-size: 12px; }
@@ -374,4 +372,27 @@ main { padding: 12px 0 30px; }
 .historical-installment-row input:disabled { opacity: .55; }
 .undo-installment-payment { padding: 4px 0; }
 .installment-origin { display: block; color: var(--muted); font-size: 10px; }
+.payment-history-row { display: grid; gap: 8px; }
+.payment-history-row .row-top small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.payment-actions { display: flex; gap: 8px; }
+.payment-actions > * { flex: 1; min-height: 38px; }
+.financing-preview { margin-top: 14px; }
+@media (max-width: 600px) {
+  .person { font-size: 15px; }
+  .subtle { font-size: 12px; line-height: 1.55; }
+  .amount { font-size: 17px; }
+  .badge { padding: 5px 9px; font-size: 11px; }
+  .inline-details { gap: 10px 14px; margin-top: 12px; line-height: 1.45; }
+  .inline-details span { font-size: 11px; }
+  .card { padding: 16px; }
+  .field label { font-size: 12px; }
+  .field-help { font-size: 11px; line-height: 1.5; }
+  .field input, .field select, .field textarea { font-size: 14px; }
+  .primary-button, .secondary-button, .danger-button { font-size: 15px; }
+  .modal-header p { font-size: 12px; line-height: 1.45; }
+  .kv { font-size: 13px; padding: 11px 0; line-height: 1.4; }
+  .progress-meta { font-size: 11px; }
+  .nav-item small { font-size: 9px; }
+  .configured-card small, .configured-card > span:last-child { font-size: 11px; }
+}
 :root[data-theme="dark"] .historical-installment-row { background: #202b39; border-color: #374457; }
