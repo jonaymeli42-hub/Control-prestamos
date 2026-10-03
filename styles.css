@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #182230;
   background: #f5f7fb;
@@ -18,6 +19,26 @@
   --card: #fff;
   --shadow: 0 8px 28px rgba(29, 48, 77, .055);
 }
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: #182230;
+  background: #f5f7fb;
+  --ink: #182230;
+  --muted: #718096;
+  --line: #e9edf3;
+  --blue: #3165e8;
+  --blue-soft: #edf2ff;
+  --green: #17845d;
+  --green-soft: #e8f7f0;
+  --orange: #c47415;
+  --orange-soft: #fff4e5;
+  --red: #c74949;
+  --red-soft: #fff0ee;
+  --card: #fff;
+  --shadow: 0 8px 28px rgba(29, 48, 77, .055);
+}
+:root[data-theme="light"] body { color: var(--ink); background: #f5f7fb; }
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #f5f7fb; }
@@ -298,6 +319,7 @@ main { padding: 12px 0 30px; }
 :root[data-theme="dark"] .calendar-day.selected,
 :root[data-theme="dark"] .calendar-day.has-due { background: #273547; }
 :root[data-theme="dark"] .calendar-day.has-due.selected { background: #2b3c59; }
+:root[data-theme="dark"] .calendar-day.other { opacity: .5; }
 :root[data-theme="dark"] .calendar-ref { color: #76d9af; }
 :root[data-theme="dark"] .calendar-ref.card-ref { color: #9bb8ff; }
 :root[data-theme="dark"] .calendar-ref.movement-ref { color: #f0b66b; }
@@ -332,3 +354,20 @@ main { padding: 12px 0 30px; }
 :root[data-theme="dark"] .setting-add input { background: #202b39; color: var(--ink); }
 :root[data-theme="dark"] .setting-add button { background: var(--blue-soft); color: #c1d1ff; }
 :root[data-theme="dark"] .bottom-nav { border-color: var(--line); }
+:root[data-theme="dark"] .badge.partial { background: #26375c; color: #c1d1ff; }
+:root[data-theme="dark"] .badge.pending { background: #493821; color: #f2bd6c; }
+:root[data-theme="dark"] .badge.paid { background: #203d35; color: #75ddb2; }
+:root[data-theme="dark"] .badge.overdue { background: #482d32; color: #ffaaa4; }
+:root[data-theme="dark"] .calendar-day.has-due.overdue-dot::after { background: #ff8c86; }
+:root[data-theme="dark"] .calendar-day.has-due.paid-dot::after { background: #62d3a2; }
+:root[data-theme="dark"] .calendar-day.has-due::after { background: #f2bd6c; }
+:root[data-theme="dark"] .historical-loan-entry { color: #d5deea; }
+.historical-loan-entry { margin: 0 0 13px; }
+.historical-installments { display: grid; gap: 10px; margin-top: 14px; }
+.historical-installment-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); }
+.historical-installment-row > strong { grid-column: 1 / -1; font-size: 12px; }
+.historical-installment-row .field { min-width: 0; }
+.historical-installment-row .field label { font-size: 10px; }
+.historical-installment-row input:disabled { opacity: .55; }
+.undo-installment-payment { padding: 4px 0; }
+:root[data-theme="dark"] .historical-installment-row { background: #202b39; border-color: #374457; }
