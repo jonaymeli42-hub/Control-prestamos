@@ -1,4 +1,4 @@
-const CACHE_NAME = 'control-prestamos-shell-v3';
+const CACHE_NAME = 'control-prestamos-shell-v4';
 const SHELL_FILES = ['./index.html', './styles.css', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {
