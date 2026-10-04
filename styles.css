@@ -46,10 +46,14 @@ button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 .app-shell { max-width: 760px; min-height: 100vh; margin: 0 auto; padding: 0 18px 100px; }
 .topbar { height: 78px; display: flex; align-items: center; gap: 12px; padding-top: env(safe-area-inset-top); }
+.topbar > div:nth-child(2) { min-width: 0; flex: 1; }
 .brand-mark { width: 40px; height: 40px; border-radius: 14px; background: linear-gradient(140deg, #4779f4, #2357d4); color: #fff; display: grid; place-items: center; font-size: 22px; font-weight: 800; box-shadow: 0 6px 14px #3165e833; }
-.topbar h1 { font-size: 17px; letter-spacing: -.45px; margin: 1px 0 0; }
+.topbar h1 { font-size: 17px; letter-spacing: -.45px; margin: 1px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .eyebrow { font-size: 9px; font-weight: 800; color: #8290a5; letter-spacing: 1.35px; margin: 0; }
 .icon-button { margin-left: auto; border: 0; background: #fff; color: var(--blue); width: 42px; height: 42px; border-radius: 15px; font-size: 26px; box-shadow: var(--shadow); cursor: pointer; }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.topbar-actions .icon-button { margin-left: 0; }
+.theme-toggle { width: 42px; height: 42px; border: 0; border-radius: 15px; background: #fff; color: var(--blue); box-shadow: var(--shadow); font-size: 21px; cursor: pointer; }
 main { padding: 12px 0 30px; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 8px 2px 18px; }
 .page-heading h2 { font-size: 24px; letter-spacing: -.8px; margin: 0; }
@@ -289,6 +293,7 @@ main { padding: 12px 0 30px; }
 }
 :root[data-theme="dark"] body { color: var(--ink); background: #141c28; }
 :root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .theme-toggle,
 :root[data-theme="dark"] .date-pill,
 :root[data-theme="dark"] .summary-card,
 :root[data-theme="dark"] .empty-state,

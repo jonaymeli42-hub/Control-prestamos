@@ -3,7 +3,7 @@
 
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
-  const VALID_THEMES = ['light', 'dark', 'auto'];
+  const VALID_THEMES = ['light', 'dark'];
   const BACKUP_FORMAT = 'control-prestamos-backup';
   const BACKUP_VERSION = 1;
   const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
@@ -46,26 +46,35 @@
   function loadThemePreference() {
     try {
       const saved = localStorage.getItem(THEME_STORAGE_KEY);
-      return VALID_THEMES.includes(saved) ? saved : 'auto';
-    } catch (_) { return 'auto'; }
+      return VALID_THEMES.includes(saved) ? saved : 'light';
+    } catch (_) { return 'light'; }
   }
 
   let themePreference = loadThemePreference();
-  const colorSchemeQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
 
   function applyTheme() {
-    const resolved = themePreference === 'auto' ? (colorSchemeQuery?.matches ? 'dark' : 'light') : themePreference;
+    const resolved = themePreference;
     const root = document.documentElement;
     root.dataset.theme = resolved;
     root.style.colorScheme = resolved;
     document.body.dataset.theme = resolved;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#141c28' : '#f5f7fb');
+    const themeToggle = document.querySelector('#theme-toggle');
+    if (themeToggle) {
+      const nextTheme = resolved === 'dark' ? 'light' : 'dark';
+      themeToggle.textContent = resolved === 'dark' ? '☀' : '☾';
+      themeToggle.setAttribute('aria-label', `Cambiar a tema ${nextTheme === 'dark' ? 'oscuro' : 'claro'}`);
+      themeToggle.title = `Cambiar a tema ${nextTheme === 'dark' ? 'oscuro' : 'claro'}`;
+    }
+  }
+
+  function toggleTheme() {
+    themePreference = themePreference === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem(THEME_STORAGE_KEY, themePreference); } catch (_) {}
+    applyTheme();
   }
 
   applyTheme();
-  const onSystemThemeChange = () => { if (themePreference === 'auto') applyTheme(); };
-  if (colorSchemeQuery?.addEventListener) colorSchemeQuery.addEventListener('change', onSystemThemeChange);
-  else colorSchemeQuery?.addListener?.(onSystemThemeChange);
 
   function loadData() {
     try {
@@ -331,7 +340,6 @@
     const future = futureMoney();
     const projection = futureProjection();
     const next = allPending.filter(item => item.dueDate >= todayKey()).slice(0, 3);
-    const recentLoans = data.loans.filter(loan => loanTotals(loan).status !== 'Pagado').slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
@@ -342,8 +350,7 @@
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y saldos de tarjetas según fecha prevista. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${next.length ? `<div class="list">${next.map(item => renderInstallmentCard(item, true)).join('')}</div>` : emptyState('↗', 'Todavía no hay cobros', 'Al registrar un préstamo, sus próximas cuotas aparecerán acá.')}</section>
-      <section class="section"><div class="section-head"><h3>Préstamos pendientes</h3><button class="text-button" data-page="loans">Ver todos</button></div>
-        ${recentLoans.length ? `<div class="list">${recentLoans.map(renderLoanCard).join('')}</div>` : emptyState('▤', 'Sin préstamos pendientes', 'Tus préstamos activos aparecerán en esta sección.')}</section>`;
+      `;
   }
 
   function renderLoanCard(loan) {
@@ -389,6 +396,11 @@
     data.movements.forEach(item => {
       const date = movementDisplayDate(item);
       if (!date) return;
+      if (item.collectionId) {
+        const collection = data.collections.find(record => record.id === item.collectionId);
+        const installment = collection && data.installments.find(record => record.id === collection.installmentId);
+        if (installment && dueLeft(installment) <= 0.005) return;
+      }
       const kind = item.collectionId || /cobro/i.test(item.type || '')
         ? 'collection'
         : item.loanId && ['Préstamo dado', 'Préstamo entregado'].includes(item.type)
@@ -441,11 +453,12 @@
     if (!loan) return '';
     const paid = dueLeft(item) <= 0.005;
     const left = dueLeft(item);
+    const displayedAmount = paid ? item.amount : left;
     const key = `installment:${item.id}`;
     const expanded = calendarExpandedEvent === key;
     const totals = loanTotals(loan);
     const status = paid ? 'Pagada' : item.paid > 0.005 ? 'Parcial' : item.dueDate < todayKey() ? 'Vencida' : 'Pendiente';
-    return `<article class="card calendar-collection-card event-loan ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="installment" data-id="${escapeHtml(item.id)}" aria-expanded="${expanded}"><span><strong>${escapeHtml(loan.code || 'Préstamo')} · ${escapeHtml(loan.person)}</strong><small>Cuota ${item.number} de ${loan.count || loanInstallments(loan.id).length} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</small></span><span class="calendar-event-summary"><b>${money(left)}</b><i class="badge ${paid ? 'paid' : item.paid > 0.005 ? 'partial' : item.dueDate < todayKey() ? 'overdue' : 'pending'}">${status}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Préstamo / persona</span><b>${escapeHtml(loan.code || 'Préstamo')} · ${escapeHtml(loan.person)}</b></div><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Cuota</span><b>${item.number} de ${loan.count || loanInstallments(loan.id).length}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(item.dueDate, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe a cobrar</span><b>${money(item.amount)}</b></div><div class="kv"><span>Total del préstamo</span><b>${money(totals.total)}</b></div><div class="kv"><span>Saldo pendiente del préstamo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado de la cuota</span><b>${status}</b></div></div><button class="secondary-button full" data-action="view-loan" data-id="${escapeHtml(loan.id)}">Ver préstamo</button>${!paid && loan.disbursed !== false ? `<button class="primary-button full" data-action="calendar-collect" data-id="${escapeHtml(item.id)}">✓ Registrar cobro</button>` : ''}</div>` : ''}</article>`;
+    return `<article class="card calendar-collection-card event-loan ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="installment" data-id="${escapeHtml(item.id)}" aria-expanded="${expanded}"><span><strong>${escapeHtml(loan.code || 'Préstamo')} · ${escapeHtml(loan.person)}</strong><small>Cuota ${item.number} de ${loan.count || loanInstallments(loan.id).length} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</small></span><span class="calendar-event-summary"><b>${money(displayedAmount)}</b><i class="badge ${paid ? 'paid' : item.paid > 0.005 ? 'partial' : item.dueDate < todayKey() ? 'overdue' : 'pending'}">${status}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Préstamo / persona</span><b>${escapeHtml(loan.code || 'Préstamo')} · ${escapeHtml(loan.person)}</b></div><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Cuota</span><b>${item.number} de ${loan.count || loanInstallments(loan.id).length}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(item.dueDate, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe a cobrar</span><b>${money(item.amount)}</b></div><div class="kv"><span>Total del préstamo</span><b>${money(totals.total)}</b></div><div class="kv"><span>Saldo pendiente del préstamo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado de la cuota</span><b>${status}</b></div></div><button class="secondary-button full" data-action="view-loan" data-id="${escapeHtml(loan.id)}">Ver préstamo</button>${!paid && loan.disbursed !== false ? `<button class="primary-button full" data-action="calendar-collect" data-id="${escapeHtml(item.id)}">✓ Registrar cobro</button>` : ''}</div>` : ''}</article>`;
   }
 
   function renderCalendarEvent(event) {
@@ -479,7 +492,7 @@
     const days = new Date(year, month + 1, 0).getDate();
     const slots = Math.ceil((offset + days) / 7) * 7;
     const events = calendarEvents();
-    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'installment', number: item.number, date: item.dueDate, amount: dueLeft(item), label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
+    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'installment', number: item.number, date: item.dueDate, amount: dueLeft(item) > 0.005 ? dueLeft(item) : item.amount, label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
     const calendarItems = [...events.filter(event => event.kind !== 'installment'), ...allLoanInstallments].sort((a, b) => a.date.localeCompare(b.date) || (a.kind === 'installment' ? 0 : 1) - (b.kind === 'installment' ? 0 : 1) || (a.number || 0) - (b.number || 0) || a.label.localeCompare(b.label));
     const eventsByDate = new Map();
     calendarItems.forEach(event => {
@@ -750,7 +763,6 @@
     const historicalTotalOut = roundMoney(historicalOut.reduce((sum, item) => sum + item.amount, 0));
     const historicalBalance = roundMoney(historicalTotalIn - historicalTotalOut);
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
-      <section class="section settings-block"><div class="section-head"><h3>Apariencia</h3></div><section class="backup-card appearance-card"><div><h3>Tema visual</h3><p>Elegí el aspecto de la aplicación.</p></div><div class="field"><label for="theme-select">Tema</label><select id="theme-select" name="theme"><option value="light" ${themePreference === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${themePreference === 'dark' ? 'selected' : ''}>Oscuro</option><option value="auto" ${themePreference === 'auto' ? 'selected' : ''}>Automático</option></select></div></section></section>
       <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
       <section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section></section>
@@ -775,13 +787,30 @@
     return `<option value="">Seleccionar</option>${values.map(value => `<option ${value === current ? 'selected' : ''} value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}`;
   }
 
+  function loanReferenceParts(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(.*?)(\d+)$/);
+    return { prefix: (match ? match[1] : text).trim(), number: match ? Number(match[2]) : 0 };
+  }
+
+  function suggestLoanReference(value) {
+    const current = loanReferenceParts(value);
+    if (!current.prefix) return '';
+    const prefix = normalizedName(current.prefix);
+    const highest = data.loans.reduce((max, loan) => {
+      const reference = loanReferenceParts(loan.code);
+      return normalizedName(reference.prefix) === prefix ? Math.max(max, reference.number) : max;
+    }, current.number);
+    return `${current.prefix}${highest + 1}`;
+  }
+
   function openLoanForm(loanId = '') {
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
     const deliveryDate = existing?.deliveryDate || todayKey();
     const firstDue = existing?.firstDue || addDate(deliveryDate, 0, 1);
     const body = `<form id="loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="form-grid">
-      <div class="field"><label for="loan-code">Código / referencia</label><input id="loan-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80"></div>
+      <div class="field"><label for="loan-code">Código / referencia</label><input id="loan-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80">${existing ? '' : '<span class="field-help" id="loan-code-suggestion">Escribí un prefijo, por ejemplo H, para ver su siguiente número.</span>'}</div>
       <div class="field"><label for="loan-person">Persona</label><input id="loan-person" name="person" value="${escapeHtml(existing?.person || '')}" list="people-list" required maxlength="80" placeholder="Nombre"><datalist id="people-list">${data.people.map(person => `<option value="${escapeHtml(person)}">`).join('')}</datalist></div>
       <div class="field"><label for="loan-mode">Modalidad</label><select id="loan-mode" name="mode" required>${data.loanTypes.map(type => `<option value="${escapeHtml(type)}" ${type === (existing?.mode || data.loanTypes[0]) ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>
       <div class="field"><label for="loan-capital">Capital prestado</label><input id="loan-capital" name="capital" type="text" data-money-input inputmode="numeric" required value="${existing ? formatIntegerInput(existing.capital) : ''}" placeholder="Ej. 100.000"></div>
@@ -796,6 +825,19 @@
     openModal(existing ? `Editar préstamo ${existing.code}` : 'Agregar préstamo', existing ? existing.person : 'Completá los datos y generaremos las cuotas.', body);
     const form = modalRoot.querySelector('#loan-form');
     form.addEventListener('submit', saveLoan);
+    if (!existing) {
+      const codeInput = form.elements.code;
+      const suggestion = form.querySelector('#loan-code-suggestion');
+      const updateSuggestion = () => {
+        const nextCode = suggestLoanReference(codeInput.value);
+        if (!nextCode) {
+          suggestion.textContent = 'Escribí un prefijo, por ejemplo H, para ver su siguiente número.';
+          return;
+        }
+        suggestion.innerHTML = `Siguiente para ${escapeHtml(loanReferenceParts(codeInput.value).prefix)}: <button type="button" class="text-button" data-action="use-loan-reference" data-value="${escapeHtml(nextCode)}">${escapeHtml(nextCode)}</button> · editable`;
+      };
+      codeInput.addEventListener('input', updateSuggestion);
+    }
     const historicalToggle = form.elements.historical;
     if (historicalToggle && form.elements.historicalPaidCount) {
       const historicalPaidField = form.querySelector('#loan-historical-paid-field');
@@ -1429,7 +1471,15 @@
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const action = button.dataset.action;
-    if (action === 'new-loan') openLoanForm();
+    if (action === 'toggle-theme') toggleTheme();
+    else if (action === 'use-loan-reference') {
+      const codeInput = modalRoot.querySelector('#loan-code');
+      if (codeInput) {
+        codeInput.value = button.dataset.value || '';
+        codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    else if (action === 'new-loan') openLoanForm();
     else if (action === 'close-modal') closeModal();
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
     else if (action === 'edit-loan') { const loan = data.loans.find(item => item.id === button.dataset.id); if (loan?.historical) openHistoricalLoanForm(button.dataset.id); else openLoanForm(button.dataset.id); }
@@ -1491,12 +1541,6 @@
   });
   document.addEventListener('change', event => {
     if (event.target.id === 'backup-file') importBackup(event.target.files?.[0]);
-    if (event.target.id === 'theme-select' && VALID_THEMES.includes(event.target.value)) {
-      themePreference = event.target.value;
-      try { localStorage.setItem(THEME_STORAGE_KEY, themePreference); } catch (_) {}
-      applyTheme();
-      render();
-    }
   });
   document.addEventListener('focusin', event => {
     if (event.target.matches('[data-money-input]')) event.target.value = String(event.target.value || '').replace(/\D/g, '');
