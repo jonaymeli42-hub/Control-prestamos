@@ -113,6 +113,7 @@
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    window.DriveBackup?.changed();
   }
 
   function id() {
@@ -792,7 +793,7 @@
     const historicalBalance = roundMoney(historicalTotalIn - historicalTotalOut);
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
       <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
-      <section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
+      <section data-drive-backup></section><section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section></section>
       <section class="section settings-block"><div class="section-head"><h3>Avisos</h3></div><section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section></section>
       <section class="section settings-block"><div class="section-head"><h3>Configuración</h3></div>
@@ -1380,6 +1381,7 @@
       const merged = mergeBackupData(data, backup.data);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       data = merged;
+      window.DriveBackup?.changed();
       page = 'home'; render(); showToast('Respaldo incorporado; los duplicados se omitieron.');
     } catch (_) { showToast('No se pudo guardar el respaldo en este dispositivo.'); }
   }
@@ -1583,6 +1585,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateDependentViews(); });
   window.addEventListener('focus', refreshDateDependentViews);
   render();
+  window.DriveBackup?.init({ app: 'prestamos', getBackup: () => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: structuredClone(data) }) });
   scheduleDateRefresh();
   registerServiceWorker().then(() => { checkDailyNotification(); scheduleNotificationTimeCheck(); });
 })();
