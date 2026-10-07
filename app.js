@@ -38,6 +38,7 @@
   let movementFilter = 'Todos';
   let projectionExpanded = false;
   let toastTimer;
+  let pendingImport = null;
 
   const app = document.querySelector('#app');
   const modalRoot = document.querySelector('#modal-root');
@@ -794,7 +795,7 @@
     return `${pageHeading('Respaldo y más', 'Respaldos, avisos y configuración.')}
       <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
       <section data-drive-backup></section><section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
-      <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><input class="sr-only" type="file" id="backup-file" accept="application/json,.json"></section></section>
+      <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><p class="field-help">Al seleccionar el archivo, verás sus cantidades y un botón para importar.</p></section></section>
       <section class="section settings-block"><div class="section-head"><h3>Avisos</h3></div><section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section></section>
       <section class="section settings-block"><div class="section-head"><h3>Configuración</h3></div>
         ${renderSettingGroup('Personas', 'people', data.people)}${renderSettingGroup('Tipos de préstamo', 'loanTypes', data.loanTypes)}${renderSettingGroup('Tarjetas', 'cards', data.cards)}
@@ -1373,17 +1374,38 @@
 
   async function importBackup(file) {
     if (!file) return;
-    let backup;
-    try { backup = JSON.parse(await file.text()); } catch (_) { showToast('No se pudo leer el JSON.'); return; }
-    if (!validateBackup(backup)) { showToast('El archivo no es un respaldo válido de Control de préstamos.'); return; }
-    if (!window.confirm('La importación incorporará los datos del respaldo a los actuales, sin reemplazarlos. Los registros duplicados se omitirán. ¿Querés continuar?')) return;
+    pendingImport = null;
+    openModal('Leer respaldo', file.name, '<p role="status">Leyendo el archivo…</p>');
     try {
-      const merged = mergeBackupData(data, backup.data);
+      const text = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('No se pudo leer el archivo. Volvé a descargarlo y seleccionarlo.'));
+        reader.readAsText(file);
+      });
+      const backup = JSON.parse(text);
+      if (!validateBackup(backup)) throw new Error('El archivo no es un respaldo válido de Control de préstamos.');
+      pendingImport = backup;
+      openModal('Confirmar importación', file.name, `<p>Esta copia contiene <strong>${backup.data.loans.length} préstamos</strong>, ${backup.data.installments.length} cuotas y ${backup.data.collections.length} cobros.</p><p>Se incorporarán a los datos actuales. Los duplicados se omitirán.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button type="button" class="primary-button" data-action="confirm-import">Importar estos datos</button></div>`);
+    } catch (error) {
+      openModal('No se pudo leer el respaldo', file.name, `<p role="alert">${escapeHtml(error instanceof SyntaxError ? 'El archivo no contiene JSON válido.' : error.message)}</p>`);
+    }
+  }
+
+  function confirmImport() {
+    if (!pendingImport) return;
+    try {
+      const merged = mergeBackupData(data, pendingImport.data);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       data = merged;
+      pendingImport = null;
+      closeModal();
+      page = 'loans'; loanFilter = 'Todos'; render();
+      showToast('Respaldo incorporado; los duplicados se omitieron.');
       window.DriveBackup?.changed();
-      page = 'home'; render(); showToast('Respaldo incorporado; los duplicados se omitieron.');
-    } catch (_) { showToast('No se pudo guardar el respaldo en este dispositivo.'); }
+    } catch (_) {
+      openModal('No se pudo guardar el respaldo', '', '<p role="alert">No se pudo guardar en este dispositivo. La copia descargada sigue intacta.</p>');
+    }
   }
 
   function changeSetting(form) {
@@ -1558,7 +1580,8 @@
     else if (action === 'realize-movement') realizeMovement(button.dataset.id);
     else if (action === 'enable-notifications') enableNotifications();
     else if (action === 'export-backup') exportBackup();
-    else if (action === 'choose-import') document.querySelector('#backup-file')?.click();
+    else if (action === 'choose-import') { const input = document.querySelector('#backup-file'); input.value = ''; input.click(); }
+    else if (action === 'confirm-import') confirmImport();
     else if (action === 'remove-setting') {
       const key = button.dataset.key; const index = Number(button.dataset.index);
       if (['people', 'groups', 'loanTypes', 'cards'].includes(key) && Number.isInteger(index)) { data[key].splice(index, 1); persist(); render(); }
