@@ -410,3 +410,15 @@ main { padding: 12px 0 30px; }
   .configured-card small, .configured-card > span:last-child { font-size: 11px; }
 }
 :root[data-theme="dark"] .historical-installment-row { background: #202b39; border-color: #374457; }
+
+/* Barra compacta, fija y redondeada como Control de gastos. */
+.bottom-nav{position:fixed;left:50%;right:auto;transform:translateX(-50%);bottom:max(8px,env(safe-area-inset-bottom));width:calc(100% - 16px);max-width:704px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px;padding:5px;background:#fff;border:1px solid #e1e6ec;border-radius:18px;box-shadow:0 8px 32px #09172d25;z-index:20;overflow:visible}
+.bottom-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;max-width:none;min-height:48px;margin:0;padding:5px 1px;border:0;border-radius:12px;background:transparent;color:#61718a;font-weight:550;white-space:nowrap;line-height:1.2}
+.bottom-nav .tab-label{font-size:clamp(7px,1.9vw,11px);margin:0;line-height:14px}
+.nav-icon{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.bottom-nav button.active{background:#137c57;color:#fff;box-shadow:0 4px 10px #137c5720}
+html[data-theme="dark"] .bottom-nav{background:#1b2833;border-color:#334452}
+html[data-theme="dark"] .bottom-nav button{color:#a4b4c3}
+html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#10291f}
+
+.topbar-actions .backup-top{display:flex;align-items:center;justify-content:center}.backup-top .nav-icon{width:21px;height:21px}
