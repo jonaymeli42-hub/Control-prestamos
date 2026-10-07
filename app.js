@@ -330,7 +330,6 @@
 
   function render() {
     document.getElementById("quick-add").hidden = page === "home";
-    app.classList.toggle("home-with-add", page === "home");
     document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.page === page));
     const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, cards: renderCards, more: renderMore };
     app.innerHTML = (views[page] || renderHome)();
@@ -345,13 +344,13 @@
     const projection = futureProjection();
     const nextDates = [...new Set(allPending.filter(item => item.dueDate >= todayKey()).map(item => item.dueDate))].sort().slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
-      <button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo" title="Agregar préstamo"><span aria-hidden="true">＋</span></button>
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
         <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span></article>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de tarjetas</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
+      <button type="button" class="primary-button home-add-loan" data-action="new-loan"><span aria-hidden="true">＋</span> Agregar préstamo</button>
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y saldos de tarjetas según fecha prevista. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
