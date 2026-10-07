@@ -26,9 +26,9 @@
     paint();
   }
   function schedule(delay = 2500) { clearTimeout(timer); timer = setTimeout(flush, delay); }
-  function changed() {
+  function changed(force = false) {
     if (!key) return;
-    try { const state = read(); write({ ...state, pending: true, revision: (state.revision || 0) + 1 }); if (state.token && !state.reconnect) schedule(); }
+    try { const state = read(); write({ ...state, pending: true, force: force || !!state.force, revision: (state.revision || 0) + 1 }); if (state.token && !state.reconnect) schedule(); }
     catch { message = 'No se pudo guardar el estado del respaldo. Conservá una copia manual.'; paint(); }
   }
   async function flush() {
@@ -39,14 +39,14 @@
     try {
       const backup = getBackup();
       const fingerprint = await hash(JSON.stringify(backup.data));
-      if (fingerprint === state.hash) {
+      if (!state.force && fingerprint === state.hash) {
         const current = read(); if (current.revision === state.revision) write({ ...current, pending: false });
       } else {
         const result = await api('/backups', backup);
         if (result.saved !== true || !result.file?.id || !result.file?.createdTime) throw new Error('El servicio no confirmó la copia.');
         const current = read();
         // A disconnected/reconnected session must not be resurrected by an old request.
-        if (current.token === state.token) write({ ...current, hash: fingerprint, last: result.file.createdTime, pending: current.revision !== state.revision });
+        if (current.token === state.token) write({ ...current, hash: fingerprint, last: result.file.createdTime, pending: current.revision !== state.revision, force: !!current.force && current.revision !== state.revision });
       }
       retry = 5000;
     } catch (error) { if (read().token === state.token) failure(error); retry = Math.min(retry * 2, 120000); }
@@ -138,7 +138,7 @@
         message = '';
         if (button.dataset.driveAction === 'connect') await connect();
         if (button.dataset.driveAction === 'disconnect') await disconnect();
-        if (button.dataset.driveAction === 'save') { changed(); clearTimeout(timer); await flush(); }
+        if (button.dataset.driveAction === 'save') { changed(true); clearTimeout(timer); await flush(); }
         if (button.dataset.driveAction === 'list') await list();
       } catch (error) { failure(error); } finally { button.disabled = false; paint(); }
     });
