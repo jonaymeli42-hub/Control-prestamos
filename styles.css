@@ -422,3 +422,8 @@ html[data-theme="dark"] .bottom-nav button{color:#a4b4c3}
 html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#10291f}
 
 .topbar-actions .backup-top{display:flex;align-items:center;justify-content:center}.backup-top .nav-icon{width:21px;height:21px}
+
+/* Los formularios se muestran por encima de la navegación. */
+.modal-backdrop{z-index:40}.modal{scroll-padding-bottom:24px}
+#quick-add[hidden]{display:none!important}
+.home-add-loan{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:calc(100% - 40px);max-width:664px;min-height:48px;border-radius:16px;z-index:6;box-shadow:0 5px 20px #09172d30;display:flex;align-items:center;justify-content:center;gap:8px}.home-add-loan span{font-size:24px;line-height:1}#app.home-with-add{padding-bottom:180px}

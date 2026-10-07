@@ -329,6 +329,8 @@
   }
 
   function render() {
+    document.getElementById("quick-add").hidden = page === "home";
+    app.classList.toggle("home-with-add", page === "home");
     document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.page === page));
     const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, cards: renderCards, more: renderMore };
     app.innerHTML = (views[page] || renderHome)();
@@ -343,6 +345,7 @@
     const projection = futureProjection();
     const nextDates = [...new Set(allPending.filter(item => item.dueDate >= todayKey()).map(item => item.dueDate))].sort().slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
+      <button type="button" class="primary-button home-add-loan" data-action="new-loan"><span aria-hidden="true">＋</span> Agregar préstamo</button>
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
         <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span></article>
