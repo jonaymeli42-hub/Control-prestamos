@@ -1486,7 +1486,8 @@
   }
 
   function refreshDateDependentViews() {
-    if (calendarSelectedDate === todayKey() || page === 'home' || page === 'collections' || page === 'calendar') render();
+    // Returning from Android's file picker must preserve the backup input.
+    if (page === 'home' || page === 'collections' || page === 'calendar') render();
     checkDailyNotification(); scheduleNotificationTimeCheck();
   }
 
