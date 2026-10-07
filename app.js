@@ -19,7 +19,7 @@
   const INITIAL_DATA = {
     app: BACKUP_FORMAT,
     version: BACKUP_VERSION,
-    loans: [], installments: [], collections: [], movements: [], cardFinancings: [], cardPayments: [],
+    loans: [], installments: [], collections: [], movements: [], cardFinancings: [], cardPayments: [], futureHistory: [],
     historical: [...HISTORICAL_TOTALS],
     people: ['Harry', 'Semanal', 'Marcelo', 'Jano', '12 Brasas'],
     groups: ['H', 'S', 'M', 'J', '12B'],
@@ -89,9 +89,10 @@
   function normalizeData(value) {
     if (!value || typeof value !== 'object') return structuredClone(INITIAL_DATA);
     const result = { ...structuredClone(INITIAL_DATA), ...value };
-    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'people', 'groups', 'loanTypes', 'cards', 'historical']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'people', 'groups', 'loanTypes', 'cards', 'historical', 'futureHistory']) {
       if (!Array.isArray(result[key])) result[key] = [...INITIAL_DATA[key]];
     }
+    result.futureHistory = result.futureHistory.filter(validFutureRecord);
     result.settings = { ...INITIAL_DATA.settings, ...(value.settings || {}) };
     // The historical totals are fixed reference data. Migrate older saved totals to the definitive set.
     result.historical = structuredClone(HISTORICAL_TOTALS);
@@ -265,6 +266,37 @@
   function futureMoney() {
     return roundMoney(movementBalance() + receivableTotal() - cardDebtTotal());
   }
+  function validFutureRecord(item) {
+    return item && typeof item.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date || '') && Number.isFinite(Date.parse(item.savedAt)) && Number.isFinite(item.amount) && ['automatic', 'manual'].includes(item.source);
+  }
+
+  function recordFutureAmount(source = 'automatic', now = new Date()) {
+    const last = data.futureHistory.reduce((latest, item) => Math.max(latest, Date.parse(item.savedAt)), 0);
+    if (source === 'automatic' && last && now.getTime() - last < 3 * 24 * 60 * 60 * 1000) return false;
+    const record = { id: id(), date: dateKey(now), savedAt: now.toISOString(), amount: futureMoney(), source };
+    const candidate = { ...data, futureHistory: [...data.futureHistory, record] };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));
+    } catch (_) {
+      showToast('No se pudo guardar el monto. Conservá una copia de tus datos.');
+      return false;
+    }
+    data = candidate;
+    window.DriveBackup?.changed();
+    return true;
+  }
+
+  function openFutureHistory() {
+    const records = data.futureHistory.slice().sort((a, b) => a.savedAt.localeCompare(b.savedAt));
+    const rows = records.map((item, index) => {
+      const previous = records[index - 1];
+      const difference = previous ? roundMoney(item.amount - previous.amount) : null;
+      const change = difference === null ? 'Primer registro' : `${difference > 0 ? '+' : difference < 0 ? '−' : ''}${money(Math.abs(difference))} respecto del anterior`;
+      return `<article class="future-history-row"><div><b>${formatDate(item.date)}</b><small>${new Date(item.savedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} · ${item.source === 'manual' ? 'Manual' : 'Automático'}</small></div><strong>${money(item.amount)}</strong><p>${escapeHtml(change)}</p></article>`;
+    }).reverse().join('');
+    openModal('Historial del dinero a futuro', 'Montos guardados, del más reciente al más antiguo.', `<p class="subtle">Se guarda automáticamente al abrir la app si pasaron 3 días desde el último registro. Cada monto conserva el valor de ese momento.</p><button type="button" class="primary-button full" data-action="save-future-amount">Guardar monto ahora</button><div class="future-history-list">${rows || '<p class="subtle">Todavía no hay registros guardados.</p>'}</div>`);
+  }
+
   function futureProjection() {
     const start = parseDate(todayKey());
     const current = movementBalance();
@@ -346,7 +378,7 @@
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
-        <article class="summary-card future"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span></article>
+        <button type="button" class="summary-card future future-history-trigger" data-action="future-history" aria-label="Ver historial del dinero a futuro"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span><span class="history-link">Ver historial ›</span></button>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de tarjetas</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
@@ -1345,12 +1377,13 @@
     if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid))) return false;
     if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
     if (backup.data.historical !== undefined && (!Array.isArray(backup.data.historical) || !backup.data.historical.every(item => item && typeof item.id === 'string' && typeof item.label === 'string' && Number.isFinite(item.amount)))) return false;
+    if (backup.data.futureHistory !== undefined && (!Array.isArray(backup.data.futureHistory) || !backup.data.futureHistory.every(validFutureRecord))) return false;
     return true;
   }
 
   function mergeBackupData(current, incoming) {
     const merged = normalizeData(structuredClone(current));
-    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'historical']) {
+    for (const key of ['loans', 'installments', 'collections', 'movements', 'cardFinancings', 'cardPayments', 'historical', 'futureHistory']) {
       const existingIds = new Set(merged[key].map(item => item.id));
       for (const item of incoming[key] || []) {
         if (!existingIds.has(item.id)) {
@@ -1510,6 +1543,7 @@
   }
 
   function refreshDateDependentViews() {
+    recordFutureAmount();
     // Returning from Android's file picker must preserve the backup input.
     if (page === 'home' || page === 'collections' || page === 'calendar') render();
     checkDailyNotification(); scheduleNotificationTimeCheck();
@@ -1526,7 +1560,9 @@
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const action = button.dataset.action;
-    if (action === 'toggle-theme') toggleTheme();
+    if (action === 'future-history') openFutureHistory();
+    else if (action === 'save-future-amount') { if (recordFutureAmount('manual')) { openFutureHistory(); showToast('Monto guardado en el historial.'); } }
+    else if (action === 'toggle-theme') toggleTheme();
     else if (action === 'use-loan-reference') {
       const codeInput = modalRoot.querySelector('#loan-code');
       if (codeInput) {
@@ -1610,6 +1646,7 @@
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateDependentViews(); });
   window.addEventListener('focus', refreshDateDependentViews);
+  recordFutureAmount();
   render();
   window.DriveBackup?.init({ app: 'prestamos', getBackup: () => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: structuredClone(data) }) });
   scheduleDateRefresh();
