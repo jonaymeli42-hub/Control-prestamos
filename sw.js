@@ -1,4 +1,4 @@
-const CACHE_NAME = 'control-prestamos-shell-v6';
+const CACHE_NAME = 'control-prestamos-shell-v7';
 const SHELL_FILES = ['./index.html', './styles.css', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {

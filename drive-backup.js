@@ -76,7 +76,7 @@
         host.innerHTML = '<h3>Respaldo privado en Google Drive</h3><p data-drive-status role="status" aria-live="polite"></p><p data-drive-last></p><div class="drive-actions"><button type="button" data-drive-action="connect">Conectar con Google</button><button type="button" data-drive-action="save">Crear copia ahora</button><button type="button" data-drive-action="disconnect">Desconectar este dispositivo</button><a href="drive-respaldos.html">Ver y descargar copias</a></div><p class="drive-note">Requiere la app abierta e Internet. Conservá también copias manuales. No se restauran datos automáticamente.</p>';
       }
       host.querySelector('[data-drive-status]').textContent = state.reconnect ? 'Necesitás reconectar con Google.' : !state.token ? 'Desconectado. Tus datos siguen guardándose localmente.' : busy ? 'Enviando copia…' : state.pending ? 'Pendiente de respaldo.' : state.last ? 'Última copia confirmada.' : 'Conectado; esperando la primera copia.';
-      host.querySelector('[data-drive-last]').textContent = (state.last ? 'Última copia confirmada: ' + new Date(state.last).toLocaleString('es-AR') + '. ' : '') + message;
+      host.querySelector('[data-drive-last]').textContent = (state.last ? 'Última copia confirmada: ' + new Date(state.last).toLocaleString('es-AR', { hourCycle: 'h23' }) + '. ' : '') + message;
       host.querySelector('[data-drive-action="connect"]').hidden = !!state.token && !state.reconnect;
       host.querySelector('[data-drive-action="connect"]').textContent = state.reconnect ? 'Reconectar con Google' : 'Conectar con Google';
       host.querySelector('[data-drive-action="save"]').hidden = !getBackup || !state.token || state.reconnect;
@@ -92,7 +92,7 @@
     if (!Array.isArray(result.files)) throw new Error('Listado inválido.');
     for (const file of result.files) {
       const row = document.createElement('li');
-      const label = document.createElement('span'); label.textContent = file.name + ' · ' + new Date(file.createdTime).toLocaleString('es-AR') + ' ';
+      const label = document.createElement('span'); label.textContent = file.name + ' · ' + new Date(file.createdTime).toLocaleString('es-AR', { hourCycle: 'h23' }) + ' ';
       const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Descargar';
       button.onclick = async () => {
         button.disabled = true;
