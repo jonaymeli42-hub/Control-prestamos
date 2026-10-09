@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const F = window.ReceivedFinancing;
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
   const VALID_THEMES = ['light', 'dark'];
@@ -103,7 +104,9 @@
     result.cardFinancings = result.cardFinancings.map(financing => {
       const paymentTotal = recordedPayments.get(financing.id) || 0;
       const legacyPaid = Math.max(0, Number(financing.legacyPaid ?? (Number(financing.paid || 0) - paymentTotal)) || 0);
-      return { ...financing, paid: roundMoney(legacyPaid + paymentTotal), legacyPaid, received: financing.historical === true || financing.received !== false, historical: financing.historical === true, payments: Array.isArray(financing.payments) ? financing.payments : [] };
+      const paid = roundMoney(legacyPaid + paymentTotal);
+      const nextPaymentDate = F.isMonthly(financing) ? F.schedule({...financing,paid}).find(row=>row.remaining>0.005)?.date || '' : financing.nextPaymentDate;
+      return { ...financing, nextPaymentDate, paid, legacyPaid, received: financing.historical === true || financing.received !== false, historical: financing.historical === true, payments: Array.isArray(financing.payments) ? financing.payments : [] };
     });
     if (result.cards.includes('Master Galicia mia') && !result.cards.includes('Master galicia mia')) {
       result.cards = result.cards.map(card => card === 'Master Galicia mia' ? 'Master galicia mia' : card);
@@ -226,6 +229,7 @@
     }
     financing.payments = payments.map(item => item.id);
     financing.paid = roundMoney(Number(financing.legacyPaid || 0) + payments.reduce((sum, item) => sum + Number(item.amount || 0), 0));
+    if (F.isMonthly(financing)) financing.nextPaymentDate = F.schedule(financing).find(row => row.remaining > 0.005)?.date || '';
   }
   function syncFinancingReceiptMovement(financing) {
     const linked = data.movements.filter(item => item.cardFinancingId === financing.id && item.type === 'Tarjeta recibida');
@@ -297,14 +301,19 @@
     openModal('Historial del dinero a futuro', 'Montos guardados, del más reciente al más antiguo.', `<p class="subtle">Se guarda automáticamente al abrir la app si pasaron 3 días desde el último registro. Cada monto conserva el valor de ese momento.</p><button type="button" class="primary-button full" data-action="save-future-amount">Guardar monto ahora</button><div class="future-history-list">${rows || '<p class="subtle">Todavía no hay registros guardados.</p>'}</div>`);
   }
 
+  function financingDues(financing) {
+    if (F.isMonthly(financing)) return F.schedule(financing).filter(row => row.remaining > 0.005).map(row => ({date:row.date, amount:row.remaining, number:row.number}));
+    return financingBalance(financing) > 0.005 ? [{date:financing.nextPaymentDate || '', amount:financingBalance(financing)}] : [];
+  }
+
   function futureProjection() {
     const start = parseDate(todayKey());
     const current = movementBalance();
     const receivables = pendingInstallments();
-    const payables = data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005);
+    const payables = data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005).flatMap(financingDues);
     const datedItems = [
       ...receivables.map(item => item.dueDate),
-      ...payables.map(item => item.nextPaymentDate)
+      ...payables.map(item => item.date)
     ].map(parseDate).filter(Boolean);
     let periodCount = 12;
     datedItems.forEach(date => {
@@ -312,11 +321,11 @@
       periodCount = Math.max(periodCount, difference + 1);
     });
     const undatedReceivables = receivables.filter(item => !parseDate(item.dueDate)).reduce((sum, item) => sum + dueLeft(item), 0);
-    const undatedPayables = payables.filter(item => !parseDate(item.nextPaymentDate)).reduce((sum, item) => sum + financingBalance(item), 0);
+    const undatedPayables = payables.filter(item => !parseDate(item.date)).reduce((sum, item) => sum + item.amount, 0);
     return Array.from({ length: periodCount }, (_, index) => {
       const endDate = dateKey(new Date(start.getFullYear(), start.getMonth() + index + 1, 0));
       const collected = receivables.filter(item => parseDate(item.dueDate) && dateKey(item.dueDate) <= endDate).reduce((sum, item) => sum + dueLeft(item), 0);
-      const datedObligations = payables.filter(item => parseDate(item.nextPaymentDate) && dateKey(item.nextPaymentDate) <= endDate).reduce((sum, item) => sum + financingBalance(item), 0);
+      const datedObligations = payables.filter(item => parseDate(item.date) && dateKey(item.date) <= endDate).reduce((sum, item) => sum + item.amount, 0);
       const cumulativeCollections = roundMoney(collected + (index === periodCount - 1 ? undatedReceivables : 0));
       const obligations = roundMoney(datedObligations + (index === periodCount - 1 ? undatedPayables : 0));
       return {
@@ -340,6 +349,8 @@
     return 'cards';
   }
   function displayMovementType(item) {
+    const financing = item.cardFinancingId && data.cardFinancings.find(f => f.id === item.cardFinancingId);
+    if (F.isMonthly(financing)) return item.cardPaymentId ? 'Financiación pagada' : 'Financiación recibida';
     return item.type === 'Préstamo entregado' ? 'Préstamo dado' : item.type;
   }
   function movementDisplayDate(item) {
@@ -380,10 +391,10 @@
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
         <button type="button" class="summary-card future future-history-trigger" data-action="future-history" aria-label="Ver historial del dinero a futuro"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span><span class="history-link">Ver historial ›</span></button>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
-        <article class="summary-card payable"><span class="label">A pagar de tarjetas</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
+        <article class="summary-card payable"><span class="label">A pagar de tarjetas y financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
       <button type="button" class="primary-button home-add-loan" data-action="new-loan"><span aria-hidden="true">＋</span> Agregar préstamo</button>
-      <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y saldos de tarjetas según fecha prevista. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
+      <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
       `;
@@ -458,7 +469,7 @@
       events.push({ id: item.id, kind, date, amount: item.amount, status: item.status || (kind === 'collection' ? 'Cobrado' : ''), label: displayMovementType(item), detail: item.person || item.description || (item.direction === 'in' ? 'Ingreso general' : 'Gasto general') });
     });
     data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005 && item.nextPaymentDate).forEach(item => {
-      events.push({ id: item.id, kind: 'card-payment', date: item.nextPaymentDate, amount: financingBalance(item), label: 'Pago de tarjeta', detail: `${item.card} · saldo pendiente` });
+      financingDues(item).forEach(row => events.push({ id: F.isMonthly(item) ? `${item.id}::${row.number}` : item.id, kind: 'card-payment', date: row.date, amount: row.amount, label: F.isMonthly(item) ? `Pago de financiación · mes ${row.number}` : 'Pago de tarjeta', detail: `${item.card} · ${F.isMonthly(item) ? 'interés mensual + capital final' : 'saldo pendiente'}` }));
     });
     const unique = new Map();
     events.filter(event => parseDate(event.date)).forEach(event => unique.set(`${event.kind}:${event.id}:${event.date}`, event));
@@ -529,7 +540,7 @@
   }
 
   function renderCalendarEvent(event) {
-    const label = ({ delivery: 'Entrega', income: 'Ingreso', expense: 'Gasto / pago', 'card-payment': 'Vencimiento tarjeta', 'card-transaction': 'Movimiento tarjeta', movement: 'Movimiento' })[event.kind] || 'Cobro';
+    const label = ({ delivery: 'Entrega', income: 'Ingreso', expense: 'Gasto / pago', 'card-payment': 'Vencimiento financiación', 'card-transaction': 'Movimiento tarjeta', movement: 'Movimiento' })[event.kind] || 'Cobro';
     const key = `${event.kind}:${event.id}`;
     const expanded = calendarExpandedEvent === key;
     const state = event.status || (event.kind === 'card-payment' ? 'Pendiente' : event.kind === 'delivery' ? 'Realizado' : 'Registrado');
@@ -545,8 +556,10 @@
       openModal('Cobro de cuota', `${loan.person} · ${loan.code}`, `<div class="card kv-list"><div class="kv"><span>Vencimiento</span><b>${formatDate(item.dueDate, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Cuota</span><b>${item.number}</b></div><div class="kv"><span>Saldo</span><b>${money(dueLeft(item))}</b></div></div><button class="primary-button full" style="margin-top:14px" data-action="calendar-collect" data-id="${escapeHtml(item.id)}">Marcar cobrado</button>`);
     } else if (['movement', 'delivery', 'collection', 'income', 'expense', 'card-transaction'].includes(kind)) openMovementDetail(eventId);
     else if (kind === 'card-payment') {
-      const financing = data.cardFinancings.find(record => record.id === eventId);
+      const [financingId] = eventId.split('::');
+      const financing = data.cardFinancings.find(record => record.id === financingId);
       if (!financing) return;
+      if (F.isMonthly(financing)) { openFinancingDetail(financing.id); return; }
       openModal('Pago de tarjeta', financing.card, `<div class="card kv-list"><div class="kv"><span>Fecha prevista</span><b>${formatDate(financing.nextPaymentDate)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><button class="primary-button full" style="margin-top:14px" data-action="calendar-pay-card" data-id="${escapeHtml(financing.id)}">Marcar pagado</button>`);
     }
   }
@@ -606,14 +619,14 @@
       balance: cardDebtTotal()
     };
     const records = [...data.cardFinancings].sort((a, b) => (b.receivedDate || '').localeCompare(a.receivedDate || ''));
-    return `${pageHeading('Tarjetas', `${records.length} financiaciones`, '<button class="primary-button" data-action="new-financing">＋ Nueva</button>')}
+    return `${pageHeading('Tarjetas y financiaciones', `${records.length} financiaciones`, '<button class="primary-button" data-action="new-financing">＋ Nueva</button>')}
       <section class="summary-grid card-summary-grid"><article class="summary-card current"><span class="label">Total recibido</span><span class="amount">${money(totals.received)}</span></article><article class="summary-card future"><span class="label">Total a devolver</span><span class="amount">${money(totals.repay)}</span></article><article class="summary-card receivable"><span class="label">Total pagado</span><span class="amount">${money(totals.paid)}</span></article><article class="summary-card payable"><span class="label">Total pendiente</span><span class="amount">${money(totals.balance)}</span></article></section>
-      <section class="section"><div class="section-head"><h3>Tarjetas disponibles</h3></div><div class="list">${data.cards.map(card => { const associated = data.cardFinancings.filter(item => normalizedName(item.card) === normalizedName(card)); const balance = associated.reduce((sum, item) => sum + financingBalance(item), 0); const upcoming = associated.filter(item => item.nextPaymentDate && financingBalance(item) > 0).sort((a, b) => a.nextPaymentDate.localeCompare(b.nextPaymentDate))[0]; return `<button class="card configured-card" data-action="card-detail" data-card="${escapeHtml(card)}"><span><b>${escapeHtml(card)}</b><small>${associated.length} financiaciones · Pendiente ${money(balance)}</small></span><span>${upcoming ? `Próximo ${formatDate(upcoming.nextPaymentDate)}` : 'Ver detalle'} ›</span></button>`; }).join('') || '<p class="subtle">No hay tarjetas configuradas.</p>'}</div>${renderSettingGroup('Tarjetas', 'cards', data.cards)}</section>
-      <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones de tarjeta', 'Registrá el dinero recibido y sus cargos para seguir el saldo.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section>`;
+      <section class="section"><div class="section-head"><h3>Tarjetas disponibles</h3></div><div class="list">${data.cards.map(card => { const associated = data.cardFinancings.filter(item => !F.isMonthly(item) && normalizedName(item.card) === normalizedName(card)); const balance = associated.reduce((sum, item) => sum + financingBalance(item), 0); const upcoming = associated.filter(item => item.nextPaymentDate && financingBalance(item) > 0).sort((a, b) => a.nextPaymentDate.localeCompare(b.nextPaymentDate))[0]; return `<button class="card configured-card" data-action="card-detail" data-card="${escapeHtml(card)}"><span><b>${escapeHtml(card)}</b><small>${associated.length} financiaciones · Pendiente ${money(balance)}</small></span><span>${upcoming ? `Próximo ${formatDate(upcoming.nextPaymentDate)}` : 'Ver detalle'} ›</span></button>`; }).join('') || '<p class="subtle">No hay tarjetas configuradas.</p>'}</div>${renderSettingGroup('Tarjetas', 'cards', data.cards)}</section>
+      <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones', 'Registrá dinero recibido de una tarjeta o de una persona y sus pagos.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section>`;
   }
 
   function openConfiguredCardDetail(card) {
-    const records = data.cardFinancings.filter(item => normalizedName(item.card) === normalizedName(card)).sort((a, b) => (a.nextPaymentDate || '9999-12-31').localeCompare(b.nextPaymentDate || '9999-12-31'));
+    const records = data.cardFinancings.filter(item => !F.isMonthly(item) && normalizedName(item.card) === normalizedName(card)).sort((a, b) => (a.nextPaymentDate || '9999-12-31').localeCompare(b.nextPaymentDate || '9999-12-31'));
     records.forEach(item => syncFinancingPaid(item));
     const received = records.filter(item => item.received !== false);
     const totalReceived = roundMoney(received.reduce((sum, item) => sum + Number(item.receivedAmount || 0), 0));
@@ -630,7 +643,7 @@
     const balance = financingBalance(financing);
     const status = financing.received === false ? 'Programada' : balance <= 0.005 ? 'Pagada' : financing.paid > 0 ? 'Parcial' : 'Pendiente';
     const badgeClass = status === 'Pagada' ? 'paid' : status === 'Parcial' ? 'partial' : 'pending';
-    return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.historical ? 'Histórica · recibida' : financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago previsto: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
+    return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.historical ? 'Histórica · recibida' : financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${F.isMonthly(financing) ? `<div class="subtle">Interés mensual + capital final · ${financing.monthCount} meses · ${formatInterestPercent(financing.interestValue)}% mensual</div>` : ''}${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago previsto: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
   }
 
   function openFinancingForm(financingId = '') {
@@ -639,17 +652,29 @@
     const cardOptions = [...new Set([...(data.cards.length ? data.cards : ['Otra']), ...(existing ? [existing.card] : [])])];
     const interestType = existing?.interestType || 'amount';
     const interestValue = existing ? (existing.interestValue ?? existing.charges ?? 0) : 0;
-    const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
+    const monthly = F.isMonthly(existing);
+    const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field full-span"><label for="financing-mode">Modalidad</label><select id="financing-mode" name="repaymentMode"><option value="single" ${!monthly?'selected':''}>Financiación de tarjeta / cargos únicos</option><option value="monthly-bullet" ${monthly?'selected':''}>Interés mensual + capital final (recibida)</option></select></div><div class="field" id="financing-card-field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field" id="financing-lender-field"><label for="financing-lender">Persona que me presta</label><input id="financing-lender" name="lender" maxlength="100" value="${escapeHtml(monthly?existing.card:'')}" placeholder="Nombre de tu amigo"></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type" id="financing-interest-label">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field" id="financing-single-date-field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field" id="financing-month-count-field"><label for="financing-month-count">Cantidad de meses</label><input id="financing-month-count" name="monthCount" type="number" min="1" max="240" step="1" value="${monthly?existing.monthCount:6}"></div><div class="field" id="financing-first-due-field"><label for="financing-first-due">Primer vencimiento</label><input id="financing-first-due" name="firstDueDate" type="date" value="${monthly?existing.firstDueDate:''}"></div><div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div id="financing-schedule-preview" class="section"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
     openModal(existing ? 'Editar financiación' : 'Nueva financiación', existing ? existing.card : 'Registrá cuánto recibiste y cuánto debés devolver.', body);
     const form = modalRoot.querySelector('#financing-form');
     form.addEventListener('submit', saveFinancing);
     const type = form.elements.interestType;
     const value = form.elements.interestValue;
     const amount = form.elements.receivedAmount;
+    const mode = form.elements.repaymentMode;
     const preview = () => {
       const base = parseMoney(amount.value);
       const rate = parseInterestPercent(value.value);
       const interest = type.value === 'percent' ? (Number.isFinite(rate) ? roundMoney(base * Math.max(0, rate) / 100) : NaN) : parseMoney(value.value);
+      if (mode.value === 'monthly-bullet') {
+        const candidate = {repaymentMode:mode.value,card:form.elements.lender.value.trim() || 'Persona',receivedAmount:base,receivedDate:form.elements.receivedDate.value,firstDueDate:form.elements.firstDueDate.value,monthCount:Number(form.elements.monthCount.value),interestValue:rate,paid:0};
+        const sums = F.totals(candidate), rows = F.schedule(candidate);
+        modalRoot.querySelector('#financing-interest-preview').textContent = `Interés por mes: ${money(sums.monthlyInterest)}`;
+        modalRoot.querySelector('#financing-charges-preview').textContent = money(sums.interest);
+        modalRoot.querySelector('#financing-total-preview').textContent = money(sums.total);
+        modalRoot.querySelector('#financing-schedule-preview').innerHTML = rows.length ? `<p class="subtle">Los intereses se calculan sobre el capital inicial. El último mes devolvés también el capital.</p>${renderReceivedSchedule(candidate)}` : '<p class="subtle">Completá capital, tasa, meses y fechas para ver el calendario de pagos.</p>';
+        return;
+      }
+      modalRoot.querySelector('#financing-schedule-preview').innerHTML = '';
       modalRoot.querySelector('#financing-interest-preview').textContent = `Intereses/cargos: ${money(interest)} · Total: ${money(roundMoney(base + interest))}`;
       modalRoot.querySelector('#financing-charges-preview').textContent = money(interest);
       modalRoot.querySelector('#financing-total-preview').textContent = money(roundMoney(base + interest));
@@ -669,8 +694,37 @@
       preview();
     });
     type.dataset.previous = type.value;
-    [value, amount].forEach(input => input.addEventListener('input', preview));
-    preview();
+    const modeFields = () => {
+      const monthly = mode.value === 'monthly-bullet';
+      for (const [selector,visible] of [['#financing-card-field',!monthly],['#financing-lender-field',monthly],['#financing-single-date-field',!monthly],['#financing-month-count-field',monthly],['#financing-first-due-field',monthly]]) {const node=form.querySelector(selector);node.hidden=!visible;node.querySelectorAll('input,select').forEach(input=>input.disabled=!visible);}
+      form.elements.lender.required=monthly;form.elements.firstDueDate.required=monthly;form.elements.monthCount.required=monthly;
+      type.hidden=monthly;type.disabled=monthly;
+      if(monthly){type.value='percent';type.dataset.previous='percent';value.inputMode='decimal';value.removeAttribute('data-money-input');}
+      else {value.inputMode=type.value==='percent'?'decimal':'numeric';value.toggleAttribute('data-money-input',type.value==='amount');}
+      const label=form.querySelector('#financing-interest-label');label.textContent=monthly?'Tasa mensual (%)':'Intereses / cargos';label.htmlFor=monthly?'financing-interest-value':'financing-interest-type';preview();
+    };
+    mode.addEventListener('change',modeFields);
+    [value, amount,form.elements.monthCount,form.elements.firstDueDate,form.elements.receivedDate].forEach(input => input.addEventListener('input', preview));
+    modeFields();
+  }
+
+  function renderReceivedSchedule(financing) {
+    return `<div class="list financing-due-list">${F.schedule(financing).map(row => `<article class="card"><div class="row-top"><b>Mes ${row.number} · ${formatDate(row.date)}</b><strong>${money(row.amount)}</strong></div><div class="subtle">Interés ${money(row.interest)}${row.capital ? ` + capital ${money(row.capital)}` : ''}</div><div class="subtle">${row.remaining <= 0.005 ? 'Pagado' : `Pendiente ${money(row.remaining)}`}</div></article>`).join('')}</div>`;
+  }
+
+  function saveMonthlyFinancing(form,values,existing) {
+    const candidate = {...(existing || {}),repaymentMode:'monthly-bullet',card:String(values.get('lender') || '').trim(),receivedAmount:parseMoney(values.get('receivedAmount')),receivedDate:String(values.get('receivedDate')),firstDueDate:String(values.get('firstDueDate')),monthCount:Number(values.get('monthCount')),interestType:'percent',interestValue:parseInterestPercent(values.get('interestValue'))};
+    if (!F.valid(candidate)) {showToast('Revisá la persona, capital, tasa mensual, cantidad de meses y vencimiento.');return;}
+    const sums=F.totals(candidate);
+    if (existing && existing.paid > sums.total + 0.005) {showToast('El total a devolver no puede ser menor que los pagos ya registrados.');return;}
+    if (existing?.paid > 0 && ['repaymentMode','receivedAmount','firstDueDate','monthCount','interestValue'].some(key=>existing[key]!==candidate[key]) && !confirm('Se recalcularán los vencimientos y se conservarán los pagos registrados, aplicados desde el primer mes. ¿Continuar?')) return;
+    const financing=existing || {id:id(),paid:0,legacyPaid:0,createdAt:new Date().toISOString(),payments:[]};
+    const historical=values.get('historical')==='on';
+    Object.assign(financing,candidate,{charges:sums.interest,totalToRepay:sums.total,historical,received:historical || financing.paid > 0 || candidate.receivedDate<=todayKey()});
+    syncFinancingPaid(financing);
+    if (!existing) data.cardFinancings.unshift(financing);
+    syncFinancingReceiptMovement(financing);
+    persist();closeModal();page='cards';render();showToast('Financiación recibida guardada con sus vencimientos mensuales.');
   }
 
   function saveFinancing(event) {
@@ -679,6 +733,7 @@
     const values = new FormData(form);
     const existing = data.cardFinancings.find(item => item.id === form.dataset.financingId);
     if (existing) syncFinancingPaid(existing);
+    if (values.get('repaymentMode') === 'monthly-bullet') { saveMonthlyFinancing(form,values,existing); return; }
     const receivedAmount = parseMoney(values.get('receivedAmount'));
     const interestType = String(values.get('interestType')) === 'percent' ? 'percent' : 'amount';
     const interestValue = interestType === 'percent' ? parseInterestPercent(values.get('interestValue')) : parseMoney(values.get('interestValue'));
@@ -686,10 +741,11 @@
     const receivedDate = String(values.get('receivedDate'));
     const nextPaymentDate = String(values.get('nextPaymentDate'));
     if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(interestValue) || interestValue < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto, los intereses y las fechas de la financiación.'); return; }
+    if (existing && F.isMonthly(existing) && existing.paid > 0 && !confirm('Se cambiará esta financiación a cargos únicos y se conservarán sus pagos. ¿Continuar?')) return;
     if (existing && existing.paid > roundMoney(receivedAmount + charges) + 0.005) { showToast('El total a devolver no puede ser menor que los pagos ya registrados.'); return; }
     const financing = existing || { id: id(), paid: 0, legacyPaid: 0, createdAt: new Date().toISOString(), payments: [] };
     const historical = values.get('historical') === 'on';
-    Object.assign(financing, { card: String(values.get('card')), receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
+    Object.assign(financing, { repaymentMode:'single', card: String(values.get('card')), receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
     syncFinancingPaid(financing);
     if (!existing) data.cardFinancings.unshift(financing);
     syncFinancingReceiptMovement(financing);
@@ -707,9 +763,10 @@
     const payments = chronological.slice().reverse();
     const legacyHistory = Number(financing.legacyPaid || 0) > 0 ? `<article class="card payment-history-row"><b>Pagado antes del historial detallado</b><strong>${money(financing.legacyPaid)}</strong><div class="subtle">El respaldo anterior no incluye fechas ni pagos individuales para este importe.</div></article>` : '';
     const history = payments.length || legacyHistory ? `<div class="list">${legacyHistory}${payments.map(payment => `<article class="card payment-history-row"><div class="row-top"><span><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })}</b><small>Fecha real del pago</small></span><strong>${money(payment.amount)}</strong></div><div class="subtle">Saldo después del pago: <b>${money(balances.get(payment.id))}</b></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}<div class="payment-actions"><button class="secondary-button" data-action="edit-card-payment" data-id="${escapeHtml(payment.id)}">Editar</button><button class="danger-button" data-action="delete-card-payment" data-id="${escapeHtml(payment.id)}">Eliminar</button></div></article>`).join('')}</div>` : '<p class="subtle">Todavía no hay pagos.</p>';
-    const controls = financing.received !== false && financingBalance(financing) > 0.005 ? `<div class="form-actions"><button class="secondary-button" data-action="schedule-card-payment" data-id="${escapeHtml(financing.id)}">Programar fecha</button><button class="primary-button" data-action="pay-card" data-id="${escapeHtml(financing.id)}">Registrar pago</button></div>` : '';
+    const schedule = F.isMonthly(financing) ? `<section class="section"><h3>Vencimientos mensuales</h3><p class="subtle">Los pagos se aplican al vencimiento más antiguo pendiente. Podés registrar pagos parciales o anticipados.</p>${renderReceivedSchedule(financing)}</section>` : '';
+    const controls = financing.received !== false && financingBalance(financing) > 0.005 ? `<div class="form-actions">${!F.isMonthly(financing)?`<button class="secondary-button" data-action="schedule-card-payment" data-id="${escapeHtml(financing.id)}">Programar fecha</button>`:''}<button class="primary-button" data-action="pay-card" data-id="${escapeHtml(financing.id)}">Registrar pago</button></div>` : '';
     const admin = `<div class="loan-detail-actions"><button class="secondary-button" data-action="edit-financing" data-id="${escapeHtml(financing.id)}">Editar</button><button class="danger-button" data-action="delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`;
-    openModal(financing.card, 'Detalle de financiación', `${admin}<div class="card kv-list"><div class="kv"><span>Fecha en que recibí el dinero</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div><div class="kv"><span>Próxima fecha prevista</span><b>${financing.nextPaymentDate ? formatDate(financing.nextPaymentDate) : 'Sin fecha'}</b></div><div class="kv"><span>Tipo</span><b>${financing.historical ? 'Histórica' : 'Normal'}</b></div></div>${controls}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
+    openModal(financing.card, 'Detalle de financiación', `${admin}<div class="card kv-list"><div class="kv"><span>Fecha en que recibí el dinero</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div><div class="kv"><span>Próxima fecha prevista</span><b>${financing.nextPaymentDate ? formatDate(financing.nextPaymentDate) : 'Sin fecha'}</b></div><div class="kv"><span>Tipo</span><b>${financing.historical ? 'Histórica' : 'Normal'}</b></div></div>${controls}${schedule}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
   }
 
   function openDeleteFinancing(financingId) {
@@ -778,13 +835,15 @@
   function openCardPaymentForm(financingId) {
     const financing = data.cardFinancings.find(item => item.id === financingId);
     if (!financing || financing.received === false || financingBalance(financing) <= 0.005) return;
+    syncFinancingPaid(financing);
     const balance = financingBalance(financing);
-    const legacyFraction = !Number.isInteger(balance);
+    const suggested = F.isMonthly(financing) ? F.schedule(financing).find(row=>row.remaining>0.005)?.remaining || balance : balance;
+    const legacyFraction = !Number.isInteger(balance) || !Number.isInteger(suggested);
     const amountField = legacyFraction
-      ? `<input id="card-payment-amount" name="amount" type="number" data-legacy-fraction="true" min="0.01" max="${balance}" step="0.01" value="${balance}" required><span class="field-help">Este saldo anterior incluye centavos; se conserva para poder cancelarlo exactamente.</span>`
-      : `<input id="card-payment-amount" name="amount" type="text" data-money-input inputmode="numeric" value="${formatIntegerInput(balance)}" required>`;
-    const body = `<form id="card-payment-form"><div class="alert">${escapeHtml(financing.card)} · Saldo pendiente ${legacyFraction ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(balance) : money(balance)}. Podés pagar cualquier monto hasta ese saldo.</div><div class="form-grid"><div class="field"><label for="card-payment-amount">Monto pagado</label>${amountField}</div><div class="field"><label for="card-payment-date">Fecha de pago</label><input id="card-payment-date" name="date" type="date" value="${todayKey()}" max="${todayKey()}" required></div><div class="field full-span"><label for="card-payment-note">Descripción (opcional)</label><input id="card-payment-note" name="note" maxlength="300"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Registrar pago</button></div></form>`;
-    openModal('Registrar pago de tarjeta', financing.card, body);
+      ? `<input id="card-payment-amount" name="amount" type="number" data-legacy-fraction="true" min="0.01" max="${balance}" step="0.01" value="${suggested}" required><span class="field-help">Este pago o saldo incluye centavos; se conservan para registrarlo exactamente.</span>`
+      : `<input id="card-payment-amount" name="amount" type="text" data-money-input inputmode="numeric" value="${formatIntegerInput(suggested)}" required>`;
+    const body = `<form id="card-payment-form"><div class="alert">${escapeHtml(financing.card)} · Saldo pendiente ${legacyFraction ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(balance) : money(balance)}. ${F.isMonthly(financing)?'Se sugiere el importe del primer mes pendiente. Los pagos se aplican desde el vencimiento más antiguo.':'Podés pagar cualquier monto hasta ese saldo.'}</div><div class="form-grid"><div class="field"><label for="card-payment-amount">Monto pagado</label>${amountField}</div><div class="field"><label for="card-payment-date">Fecha de pago</label><input id="card-payment-date" name="date" type="date" value="${todayKey()}" max="${todayKey()}" required></div><div class="field full-span"><label for="card-payment-note">Descripción (opcional)</label><input id="card-payment-note" name="note" maxlength="300"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Registrar pago</button></div></form>`;
+    openModal(F.isMonthly(financing)?'Registrar pago de financiación':'Registrar pago de tarjeta', financing.card, body);
     modalRoot.querySelector('#card-payment-form').addEventListener('submit', event => saveCardPayment(event, financing.id));
   }
 
@@ -810,6 +869,7 @@
   function openCardScheduleForm(financingId) {
     const financing = data.cardFinancings.find(item => item.id === financingId);
     if (!financing || financingBalance(financing) <= 0.005) return;
+    if(F.isMonthly(financing)){openFinancingForm(financing.id);return;}
     const body = `<form id="card-schedule-form"><div class="field"><label for="schedule-date">Próxima fecha prevista de pago</label><input id="schedule-date" name="date" type="date" min="${todayKey()}" value="${financing.nextPaymentDate || todayKey()}" required></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar fecha</button></div></form>`;
     openModal('Programar pago', financing.card, body);
     modalRoot.querySelector('#card-schedule-form').addEventListener('submit', event => {
@@ -1254,7 +1314,7 @@
     const suggested = Number.isInteger(left) ? left : Math.floor(left);
     const legacyFraction = !Number.isInteger(left);
     const amountField = legacyFraction
-      ? `<input id="payment-amount" name="amount" type="number" data-legacy-fraction="true" min="0.01" max="${left}" step="0.01" value="${left}" required><span class="field-help">Este saldo anterior incluye centavos; se conserva para poder cancelarlo exactamente.</span>`
+      ? `<input id="payment-amount" name="amount" type="number" data-legacy-fraction="true" min="0.01" max="${left}" step="0.01" value="${left}" required><span class="field-help">Este pago o saldo incluye centavos; se conservan para registrarlo exactamente.</span>`
       : `<input id="payment-amount" name="amount" type="text" data-money-input inputmode="numeric" value="${formatIntegerInput(suggested)}" required>`;
     const body = `<form id="payment-form"><div class="alert">${escapeHtml(loan.person)} · Cuota ${item.number}. Importe ${money(item.amount)}; pagado ${money(item.paid)}; pendiente ${legacyFraction ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 }).format(left) : money(left)}.</div><div class="form-grid"><div class="field"><label for="payment-amount">Importe cobrado</label>${amountField}</div><div class="field"><label for="payment-date">Fecha</label><input id="payment-date" name="date" type="date" value="${todayKey()}" required></div><div class="field full-span"><label for="payment-note">Observación</label><input id="payment-note" name="note" maxlength="500" placeholder="Opcional"></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Guardar cobro</button></div></form>`;
     openModal('Registrar cobro', `Cuota ${item.number} · ${loan.code}`, body);
@@ -1374,7 +1434,7 @@
     if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
     for (const key of ['cardFinancings', 'cardPayments']) if (backup.data[key] !== undefined && !Array.isArray(backup.data[key])) return false;
-    if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid))) return false;
+    if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid) && (!F.isMonthly(item) || (F.valid(item) && Math.abs(F.totals(item).total-item.totalToRepay)<0.005 && item.paid>=0 && item.paid<=item.totalToRepay+0.005)))) return false;
     if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
     if (backup.data.historical !== undefined && (!Array.isArray(backup.data.historical) || !backup.data.historical.every(item => item && typeof item.id === 'string' && typeof item.label === 'string' && Number.isFinite(item.amount)))) return false;
     if (backup.data.futureHistory !== undefined && (!Array.isArray(backup.data.futureHistory) || !backup.data.futureHistory.every(validFutureRecord))) return false;
