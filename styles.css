@@ -431,3 +431,7 @@ html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#1029
 .home-add-loan{display:flex;align-items:center;justify-content:center;gap:8px;position:static;width:fit-content;max-width:100%;min-height:46px;margin:18px 0 6px;padding:10px 18px;border-radius:14px}.home-add-loan span{font-size:24px;line-height:1}
 
 .future-history-trigger{border:0;text-align:left;font:inherit;cursor:pointer;position:relative}.history-link{display:block;margin-top:9px;font-size:11px;font-weight:700;color:var(--blue)}.future-history-list{display:grid;gap:12px;margin-top:18px}.future-history-row{padding:15px;background:var(--card);border:1px solid var(--line);border-radius:14px}.future-history-row>div{display:flex;align-items:center;justify-content:space-between;gap:10px}.future-history-row small{font-size:11px;color:var(--muted)}.future-history-row>strong{display:block;font-size:25px;margin-top:10px}.future-history-row p{margin:6px 0 0;font-size:12px;color:var(--muted)}
+
+.home-add-actions{display:flex;align-items:stretch;gap:8px;margin:18px 0 6px}.home-add-actions .home-add-loan,.home-add-actions .home-add-financing{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;min-height:46px;margin:0;padding:10px 8px;border-radius:14px;font-size:12px}.home-add-actions span{font-size:19px;line-height:1}
+
+.home-add-actions .home-add-loan{flex:1.2;font-size:13px}.home-add-actions .home-add-financing{flex:1}
