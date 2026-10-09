@@ -162,7 +162,8 @@ main { padding: 12px 0 30px; }
 .calendar-collection-amount { align-items: baseline; }
 .calendar-collection-amount strong { font-size: 17px; }
 .calendar-day.today { outline: 2px solid #3165e8; background: #edf3ff; color: #1749bd; font-weight: 800; }
-.calendar-day.selected { background: #edf2ff; }
+.calendar-day.selected { background: #dff5e9; outline: none; box-shadow: inset 0 0 0 2px #16845b; }
+.calendar-day.selected .calendar-date-number { color: #116b49; }
 .calendar-day.other { opacity: .3; }
 .calendar-count { position: absolute; top: 2px; right: 5px; color: #315fd1; font-size: 8px; font-weight: 800; }
 .calendar-ref.card-ref { color: #245cc2; background: #e6efff; }
@@ -334,7 +335,8 @@ main { padding: 12px 0 30px; }
 :root[data-theme="dark"] .modal { background: #1a2432; }
 :root[data-theme="dark"] .calendar-day { color: #e0e8f4; }
 :root[data-theme="dark"] .calendar-day.today { background: #26375c; color: #c1d1ff; outline-color: #91adff; }
-:root[data-theme="dark"] .calendar-day.selected { background: #273547; }
+:root[data-theme="dark"] .calendar-day.selected { background: #1e4338; box-shadow: inset 0 0 0 2px #69efb4; }
+:root[data-theme="dark"] .calendar-day.selected .calendar-date-number { color: #69efb4; }
 :root[data-theme="dark"] .calendar-day.other { opacity: .5; }
 :root[data-theme="dark"] .calendar-ref.card-ref { color: #9bb8ff; background: #243754; }
 :root[data-theme="dark"] .calendar-ref.movement-ref { color: #c0cada; background: #303d4f; }
