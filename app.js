@@ -393,7 +393,7 @@
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
-      <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan"><span aria-hidden="true">＋</span> Agregar préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing"><span aria-hidden="true">＋</span> Agregar financiación</button></div>
+      <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
@@ -1672,7 +1672,7 @@
     } else if (action === 'calendar-event-detail') openCalendarEvent(button.dataset.kind, button.dataset.id);
     else if (action === 'calendar-collect') openPayForm(button.dataset.id);
     else if (action === 'calendar-pay-card') openCardPaymentForm(button.dataset.id);
-    else if (action === 'new-movement') openMovementForm();
+    else if (action === 'new-movement' || action === 'new-income') openMovementForm();
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
     else if (action === 'edit-financing') openFinancingForm(button.dataset.id);

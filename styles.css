@@ -435,3 +435,5 @@ html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#1029
 .home-add-actions{display:flex;align-items:stretch;gap:8px;margin:18px 0 6px}.home-add-actions .home-add-loan,.home-add-actions .home-add-financing{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;min-width:0;min-height:46px;margin:0;padding:10px 8px;border-radius:14px;font-size:12px}.home-add-actions span{font-size:19px;line-height:1}
 
 .home-add-actions .home-add-loan{flex:1.2;font-size:13px}.home-add-actions .home-add-financing{flex:1}
+
+.home-add-actions{gap:6px}.home-add-actions .home-add-loan{flex:1.25}.home-add-actions .home-add-financing{flex:1.15}.home-add-actions .home-add-income{display:flex;align-items:center;justify-content:center;gap:4px;flex:.8;min-width:0;min-height:46px;padding:10px 5px;border-radius:14px;font-size:12px}.home-add-actions .home-add-loan,.home-add-actions .home-add-financing{padding-inline:5px;gap:4px}
