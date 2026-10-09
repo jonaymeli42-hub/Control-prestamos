@@ -12,8 +12,8 @@
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css?v=future-history-1">
   <script src="drive-backup.js?v=backup-24h-1" defer></script>
-  <script src="financing-model.js?v=received-monthly-1" defer></script>
-  <script src="app.js?v=received-monthly-1" defer></script>
+  <script src="financing-model.js?v=financing-navigation-1" defer></script>
+  <script src="app.js?v=financing-navigation-1" defer></script>
 <link rel="stylesheet" href="drive-backup.css"></head>
 <body>
   <div class="app-shell">
@@ -26,7 +26,7 @@
       </div>
     </header>
     <main id="app" tabindex="-1" aria-live="polite"></main>
-    <nav class="bottom-nav" aria-label="Pestañas principales"><button data-page="home" class="nav-item" aria-label="Inicio"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7M5 9v12h14V9M9 21v-7h6v7"></path></svg><span class="tab-label">Inicio</span></button><button data-page="calendar" class="nav-item" aria-label="Calendario"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h1M14 14h1M8 18h1M14 18h1"></path></svg><span class="tab-label">Calendario</span></button><button data-page="collections" class="nav-item" aria-label="Cobros"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4M4 18v3h16v-3"></path></svg><span class="tab-label">Cobros</span></button><button data-page="loans" class="nav-item" aria-label="Préstamos"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"></path></svg><span class="tab-label">Préstamos</span></button><button data-page="movements" class="nav-item" aria-label="Movimientos"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"></path></svg><span class="tab-label">Movimientos</span></button><button data-page="cards" class="nav-item" aria-label="Tarjetas"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v13H3zM3 10h18M15 14h3"></path></svg><span class="tab-label">Tarjetas</span></button></nav>
+    <nav class="bottom-nav" aria-label="Pestañas principales"><button data-page="home" class="nav-item" aria-label="Inicio"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7M5 9v12h14V9M9 21v-7h6v7"></path></svg><span class="tab-label">Inicio</span></button><button data-page="calendar" class="nav-item" aria-label="Calendario"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h1M14 14h1M8 18h1M14 18h1"></path></svg><span class="tab-label">Calendario</span></button><button data-page="collections" class="nav-item" aria-label="Cobros"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4M4 18v3h16v-3"></path></svg><span class="tab-label">Cobros</span></button><button data-page="loans" class="nav-item" aria-label="Préstamos"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"></path></svg><span class="tab-label">Préstamos</span></button><button data-page="movements" class="nav-item" aria-label="Movimientos"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"></path></svg><span class="tab-label">Movimientos</span></button><button data-page="cards" class="nav-item" aria-label="Financiación"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v13H3zM3 10h18M15 14h3"></path></svg><span class="tab-label">Financiación</span></button></nav>
   </div>
   <input class="sr-only" type="file" id="backup-file" accept="application/json,.json">
   <div id="modal-root"></div>

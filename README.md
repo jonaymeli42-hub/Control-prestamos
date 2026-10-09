@@ -2,7 +2,7 @@
 
 ## Financiación recibida con interés mensual y capital final
 
-En **Tarjetas → Nueva**, elegí **Interés mensual + capital final (recibida)**.
+En **Financiación → Nueva**, elegí **Interés mensual + capital final (recibida)**.
 Ingresá la persona que te presta, el capital, la tasa mensual, la cantidad de meses,
 la fecha de recepción y el primer vencimiento. La tasa se aplica al capital inicial
 cada mes. El último pago incluye ese interés y la devolución de todo el capital.
@@ -26,3 +26,10 @@ El préstamo que otorgás a tu cliente se registra por separado en Préstamos.
 La app no vincula automáticamente ambos contratos ni registra pagos por sí sola.
 
 Validación del cálculo: `node --test tests/financing-model.test.cjs`.
+
+El primer vencimiento de una financiación nueva se propone un mes después de
+la recepción, respetando el último día de los meses cortos. Se actualiza al
+cambiar la fecha de recepción mientras no se haya elegido un vencimiento manual.
+Al editar una financiación existente se conserva el vencimiento guardado.
+Desde el detalle de un movimiento de recepción o pago se puede abrir la
+financiación asociada con el botón Ver financiación.

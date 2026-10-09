@@ -25,3 +25,11 @@ test('rechaza fechas inexistentes, antes de recepción, tasas negativas y plazos
  for(const changes of [{firstDueDate:'2027-02-30'},{firstDueDate:'2026-09-09'},{interestValue:-1},{monthCount:0},{monthCount:241},{monthCount:1.5},{receivedAmount:0},{card:''},{interestValue:Infinity}])assert.equal(F.valid({...base,...changes}),false);
  assert.deepEqual(F.schedule({repaymentMode:'single'}),[]);
 });
+
+test('primer vencimiento: mes siguiente con fin de mes y cambio de año',()=>{
+ assert.equal(F.nextMonthDate('2026-10-09'),'2026-11-09');
+ assert.equal(F.nextMonthDate('2027-01-31'),'2027-02-28');
+ assert.equal(F.nextMonthDate('2028-01-31'),'2028-02-29');
+ assert.equal(F.nextMonthDate('2026-12-15'),'2027-01-15');
+ assert.equal(F.nextMonthDate('2026-02-30'),'');
+});

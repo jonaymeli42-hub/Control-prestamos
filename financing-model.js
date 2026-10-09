@@ -6,6 +6,11 @@
     const [y,m,d] = value.split('-').map(Number), date = new Date(y,m-1,d);
     return date.getFullYear() === y && date.getMonth() === m-1 && date.getDate() === d ? [y,m,d] : null;
   };
+  function nextMonthDate(value) {
+    const parts=dateParts(value);if(!parts)return '';
+    const [y,m,d]=parts,target=new Date(y,m,1),day=Math.min(d,new Date(target.getFullYear(),target.getMonth()+1,0).getDate());
+    return `${target.getFullYear()}-${String(target.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
   const isMonthly = f => f?.repaymentMode === 'monthly-bullet';
   const valid = f => !!dateParts(f.firstDueDate) && !!dateParts(f.receivedDate) && f.firstDueDate >= f.receivedDate && Number.isFinite(f.receivedAmount) && f.receivedAmount > 0 && Number.isFinite(f.interestValue) && f.interestValue >= 0 && Number.isInteger(f.monthCount) && f.monthCount >= 1 && f.monthCount <= 240 && typeof f.card === 'string' && f.card.trim().length > 0 && f.card.length <= 100 && Number.isSafeInteger(Math.round((f.receivedAmount + round(f.receivedAmount * f.interestValue / 100) * f.monthCount) * 100));
   function schedule(f) {
@@ -21,5 +26,5 @@
     });
   }
   function totals(f) {const rows=schedule({...f,paid:0});return {interest:round(rows.reduce((n,r)=>n+r.interest,0)),total:round(rows.reduce((n,r)=>n+r.amount,0)),monthlyInterest:rows[0]?.interest || 0};}
-  globalThis.ReceivedFinancing = {isMonthly,valid,schedule,totals};
+  globalThis.ReceivedFinancing = {isMonthly,valid,schedule,totals,nextMonthDate};
 })();
