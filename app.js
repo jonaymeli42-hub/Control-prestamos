@@ -119,6 +119,7 @@
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     window.DriveBackup?.changed();
+    window.PushReminders?.changed();
   }
 
   function id() {
@@ -897,7 +898,7 @@
       <section class="historical-section"><div class="historical-heading"><div><span class="historical-eyebrow">REFERENCIA</span><h3>Histórico</h3></div></div><p class="historical-note">Totales del sistema anterior, antes del comienzo del nuevo sistema. Son datos de referencia: no forman parte del dinero actual o futuro ni de los préstamos, cobros, movimientos u obligaciones vigentes. Consultá el Excel para ver el detalle de las operaciones.</p><h4>Entradas históricas</h4><div class="historical-list">${historicalIn.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><h4>Salidas históricas</h4><div class="historical-list">${historicalOut.map(item => `<div class="historical-row"><span>${escapeHtml(item.label)}</span><strong>${money(item.amount)}</strong></div>`).join('')}</div><div class="historical-summary"><div><span>Total histórico entrado</span><strong>${money(historicalTotalIn)}</strong></div><div><span>Total histórico salido</span><strong>${money(historicalTotalOut)}</strong></div><div><span>Dinero actual histórico</span><strong>${money(historicalBalance)}</strong></div></div></section>
       <section data-drive-backup></section><section class="section settings-block"><div class="section-head"><h3>Respaldo</h3></div><section class="backup-card"><h3>📤 Exportar respaldo</h3><p>Descargá un JSON con préstamos, cuotas, cobros, movimientos, financiaciones, pagos de tarjetas, configuración, avisos y totales históricos.</p><button class="primary-button full" data-action="export-backup">Exportar respaldo</button></section>
       <section class="backup-card"><h3>📥 Importar respaldo</h3><p>Elegí un respaldo JSON válido para incorporar sus datos. Los datos actuales se conservarán y los registros duplicados se omitirán, incluso si importás el mismo respaldo más de una vez.</p><button class="secondary-button full" data-action="choose-import">Seleccionar archivo JSON</button><p class="field-help">Al seleccionar el archivo, verás sus cantidades y un botón para importar.</p></section></section>
-      <section class="section settings-block"><div class="section-head"><h3>Avisos</h3></div><section class="backup-card"><h3>🔔 Avisos de cobros</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><p class="field-help" style="margin:9px 0 0">El navegador no puede ejecutar avisos diarios de forma confiable con la app completamente cerrada sin un servicio de notificaciones externo.</p></section></section>
+      <section class="section settings-block"><div class="section-head"><h3>Avisos</h3></div><section class="backup-card"><h3>🔔 Avisos al abrir la app</h3><p>${escapeHtml(notificationStatusText())} Si permitís los avisos, la app revisa las cuotas pendientes de hoy al abrirse y a partir de las ${escapeHtml(data.settings.notificationTime || '09:00')} mientras permanece abierta.</p><button class="secondary-button full" data-action="enable-notifications">${notificationButtonText()}</button><div style="margin-top:16px"><h3>Avisos de mañana</h3><p data-push-status role="status">${escapeHtml(window.PushReminders?.status()||'Preparando los avisos…')}</p><button class="primary-button full" data-action="enable-morning-push">${window.PushReminders?.enabled()?'Desactivar avisos de mañana':'Activar avisos de mañana'}</button>${window.PushReminders?.enabled()?'<button class="secondary-button full" style="margin-top:8px" data-action="test-morning-push">Enviar aviso de prueba</button>':''}<p class="field-help" style="margin:9px 0 0">Requiere conectar Google en Respaldo. Se envían las fechas, cantidades e importes de los cobros pendientes, sin nombres de clientes. Actualizá los préstamos con Internet para mantener los avisos al día. El horario de recepción depende de la conexión del celular.</p><a href="configurar-avisos.html">Configuración inicial del servicio</a></div></section></section>
       <section class="section settings-block"><div class="section-head"><h3>Configuración</h3></div>
         ${renderSettingGroup('Personas', 'people', data.people)}${renderSettingGroup('Tipos de préstamo', 'loanTypes', data.loanTypes)}${renderSettingGroup('Tarjetas', 'cards', data.cards)}
       </section><p class="subtle" style="text-align:center;margin-top:24px">Los datos se guardan en este dispositivo. Exportá un respaldo con regularidad.</p>`;
@@ -1567,6 +1568,7 @@
   }
 
   async function checkDailyNotification() {
+    if (window.PushReminders?.enabled()) return;
     if (!data.settings.notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
     const today = todayKey();
     if (data.settings.lastNotificationDate === today) return;
@@ -1624,7 +1626,7 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => toastNode.classList.remove('show'), 2600);
   }
 
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
     const pageButton = event.target.closest('[data-page]');
     if (pageButton) { page = pageButton.dataset.page; render(); return; }
     const button = event.target.closest('[data-action]');
@@ -1687,6 +1689,15 @@
     else if (action === 'delete-movement') deleteManualMovement(button.dataset.id);
     else if (action === 'realize-movement') realizeMovement(button.dataset.id);
     else if (action === 'enable-notifications') enableNotifications();
+    else if (action === 'enable-morning-push' || action === 'test-morning-push') {
+      if(button.disabled)return;button.disabled=true;
+      try {
+        if(action==='test-morning-push') {await window.PushReminders.test();showToast('Prueba enviada. Revisá las notificaciones del celular.');}
+        else if(window.PushReminders.enabled()){await window.PushReminders.disable();showToast('Avisos de mañana desactivados.');}
+        else {await window.PushReminders.enable();showToast('Avisos de mañana activados para las 9:00.');}
+      } catch(error){openModal('Avisos de mañana','Revisá la conexión',`<p>${escapeHtml(error.message)}</p>`);}
+      finally{button.disabled=false;render();}
+    }
     else if (action === 'export-backup') exportBackup();
     else if (action === 'choose-import') { const input = document.querySelector('#backup-file'); input.value = ''; input.click(); }
     else if (action === 'confirm-import') confirmImport();
@@ -1719,6 +1730,12 @@
   recordFutureAmount();
   render();
   window.DriveBackup?.init({ app: 'prestamos', getBackup: () => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: structuredClone(data) }) });
+  window.PushReminders?.init({register:registerServiceWorker,days:()=>{
+    const days=new Map();
+    pendingInstallments().forEach(item=>{const cents=Math.round(dueLeft(item)*100);if(item.dueDate<todayKey()||cents<=0)return;const day=days.get(item.dueDate)||{date:item.dueDate,count:0,cents:0};day.count++;day.cents+=cents;days.set(item.dueDate,day);});
+    return [...days.values()].sort((a,b)=>a.date.localeCompare(b.date));
+  }});
+  window.addEventListener('push-reminders-change',()=>{const node=document.querySelector('[data-push-status]');if(node)node.textContent=window.PushReminders.status();});
   scheduleDateRefresh();
   registerServiceWorker().then(() => { checkDailyNotification(); scheduleNotificationTimeCheck(); });
 })();

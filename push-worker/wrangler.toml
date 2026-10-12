@@ -1,0 +1,9 @@
+name = "avisos-prestamos"
+main = "worker.mjs"
+compatibility_date = "2026-10-12"
+# Cron is UTC: 12:00 UTC = 09:00 Argentina; retries until 09:55.
+[triggers]
+crons = ["*/5 12 * * *"]
+[[kv_namespaces]]
+binding = "AVISOS"
+id = "REEMPLAZAR_POR_ID_DEL_KV"

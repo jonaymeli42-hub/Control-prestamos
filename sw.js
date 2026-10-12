@@ -1,5 +1,5 @@
-const CACHE_NAME = 'control-prestamos-shell-v12';
-const SHELL_FILES = ['./index.html', './styles.css', './app.js', './financing-model.js?v=financing-navigation-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
+const CACHE_NAME = 'control-prestamos-shell-v13';
+const SHELL_FILES = ['./index.html', './styles.css', './app.js', './push-reminders.js?v=morning-1', './financing-model.js?v=financing-navigation-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
@@ -29,4 +29,14 @@ self.addEventListener('notificationclick', event => {
     if (current) return current.navigate(target).then(client => (client || current).focus());
     return self.clients.openWindow(target);
   }));
+});
+
+self.addEventListener('push', event => {
+  event.waitUntil((async()=>{
+    let message;try{message=event.data?.json();}catch{}
+    if(!message||typeof message.body!=='string')message={title:'🔔 Cobros',body:'Abrí Control Préstamos para consultar tus cobros.',tag:'cobros',url:'?page=collections'};
+    const target=new URL(message.url||'?page=collections',self.registration.scope);
+    if(target.origin!==self.location.origin||!target.pathname.startsWith(new URL(self.registration.scope).pathname))target.href=new URL('?page=collections',self.registration.scope).href;
+    await self.registration.showNotification(String(message.title||'🔔 Cobros').slice(0,100),{body:message.body.slice(0,1000),tag:String(message.tag||'cobros').slice(0,100),renotify:false,icon:new URL('icon-192.png',self.registration.scope).href,badge:new URL('icon-192.png',self.registration.scope).href,data:{url:target.href}});
+  })());
 });

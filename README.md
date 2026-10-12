@@ -33,3 +33,23 @@ cambiar la fecha de recepción mientras no se haya elegido un vencimiento manual
 Al editar una financiación existente se conserva el vencimiento guardado.
 Desde el detalle de un movimiento de recepción o pago se puede abrir la
 financiación asociada con el botón Ver financiación.
+
+## Avisos de cobros de mañana
+
+`push-reminders.js` permite activar Web Push a las 09:00 de Argentina aun con
+la app cerrada. Es optativo por dispositivo y requiere una conexión Google
+válida del servicio de respaldos. El Worker independiente está en
+`push-worker/worker.mjs`; su configuración inicial se explica en
+`configurar-avisos.html` y `push-worker/README.md`. El Worker de respaldos
+existente no se reemplaza ni se modifica.
+
+El celular sincroniza un calendario de fechas, cantidades e importes pendientes
+al activar los avisos, abrir la app o modificar registros. Solo se avisa sobre
+cuotas pendientes que vencen ese día. Los cambios hechos sin Internet necesitan
+una sincronización posterior con la app abierta. Cuando Web Push está activo,
+se omite el aviso local para evitar dos mecanismos de entrega en el mismo
+celular. La llegada depende de Internet y los permisos del teléfono.
+
+Checks: `node --test tests/financing-model.test.cjs tests/push-worker.test.mjs
+tests/push-service-worker.test.cjs`. La entrega real requiere configurar el
+Worker, KV y cron en Cloudflare y activar/probar desde el teléfono del usuario.
