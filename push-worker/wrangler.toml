@@ -7,3 +7,7 @@ crons = ["*/5 12 * * *"]
 [[kv_namespaces]]
 binding = "AVISOS"
 id = "REEMPLAZAR_POR_ID_DEL_KV"
+
+[[services]]
+binding = "RESPALDOS"
+service = "respaldo-mis-apps"

@@ -15,7 +15,14 @@ export function validEndpoint(endpoint){try{const u=new URL(endpoint);return u.p
 export function validSubscription(value){return value&&validEndpoint(value.endpoint)&&value.endpoint.length<=2048&&/^[A-Za-z0-9_-]{87}$/.test(value.keys?.p256dh||'')&&decode(value.keys.p256dh)[0]===4&&/^[A-Za-z0-9_-]{22}$/.test(value.keys?.auth||'');}
 export function validSchedule(days){return Array.isArray(days)&&days.length<=2000&&days.every((d,i)=>d&&/^\d{4}-\d{2}-\d{2}$/.test(d.date)&&Number.isFinite(Date.parse(d.date+'T12:00:00Z'))&&new Date(d.date+'T12:00:00Z').toISOString().slice(0,10)===d.date&&Number.isSafeInteger(d.count)&&d.count>0&&d.count<=100000&&Number.isSafeInteger(d.cents)&&d.cents>0&&d.cents<=Number.MAX_SAFE_INTEGER&&(!i||days[i-1].date<d.date));}
 async function jsonBody(request){requireValue(request.headers.get('content-type')?.startsWith('application/json'),415,'Se requiere JSON.');const reader=request.body?.getReader();requireValue(reader,400,'Falta el contenido.');let size=0;const chunks=[];while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>200000){await reader.cancel();throw new Failure(413,'Calendario demasiado grande.');}chunks.push(value);}try{return JSON.parse(new TextDecoder().decode(concat(...chunks)));}catch{throw new Failure(400,'JSON inválido.');}}
-async function authenticate(request){const token=request.headers.get('authorization');requireValue(/^Bearer [A-Za-z0-9_-]{43}$/.test(token||''),401,'Conectá tu cuenta de Google en Respaldo primero.');const result=await fetch(BACKUP+'/backups',{headers:{Origin:APP_ORIGIN,Authorization:token},signal:AbortSignal.timeout(20000),redirect:'manual'});requireValue(result.ok,result.status===401||result.status===403?401:503,'No se pudo validar la conexión. Revisá Respaldo y reintentá.');await result.body?.cancel();}
+async function authenticate(request,env){
+  const token=request.headers.get('authorization');
+  requireValue(/^Bearer [A-Za-z0-9_-]{43}$/.test(token||''),401,'Conectá tu cuenta de Google en Respaldo primero.');
+  requireValue(env.RESPALDOS?.fetch,503,'Falta vincular RESPALDOS al servicio respaldo-mis-apps en Cloudflare.');
+  const result=await env.RESPALDOS.fetch(BACKUP+'/backups',{headers:{Origin:APP_ORIGIN,Authorization:token},signal:AbortSignal.timeout(20000),redirect:'manual'});
+  await result.body?.cancel();
+  requireValue(result.ok,result.status===401||result.status===403?401:503,result.status===401?'La conexión de Google venció. Reconectá Google en Respaldo y reintentá.':result.status===403?'El servicio de Respaldo rechazó la conexión. Revisá la cuenta conectada.':'El servicio de Respaldo no pudo validar la conexión. Reintentá en unos minutos.');
+}
 async function signingKeys(env){let saved=await env.AVISOS.get('vapid',{type:'json'});if(saved)return saved;const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);saved={privateKey:await crypto.subtle.exportKey('jwk',pair.privateKey),publicKey:encode(await crypto.subtle.exportKey('raw',pair.publicKey))};await env.AVISOS.put('vapid',JSON.stringify(saved));return saved;}
 export async function pushRequest(subscription,payload,keys,now=Date.now()){
   const ephemeral=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
@@ -59,12 +66,12 @@ export async function sendMorning(env,now=Date.now(),send=fetch){
 export default {
   async fetch(request,env){try{
     const url=new URL(request.url);if(request.method==='OPTIONS'){requireValue(request.headers.get('origin')===APP_ORIGIN,403,'Origen no autorizado.');return response(null,204);}
-    if(url.pathname==='/health')return response({service:'avisos-prestamos',configured:!!env.AVISOS});
+    if(url.pathname==='/health')return response({service:'avisos-prestamos',configured:!!env.AVISOS,backupLinked:!!env.RESPALDOS?.fetch});
     requireValue(env.AVISOS,503,'Falta configurar el almacenamiento de avisos.');
     requireValue(request.headers.get('origin')===APP_ORIGIN,403,'Origen no autorizado.');
     requireValue(['/config','/subscribe','/unsubscribe','/test'].includes(url.pathname),404,'Ruta inexistente.');
     requireValue(request.method===(url.pathname==='/config'?'GET':'POST'),405,'Método no permitido.');
-    await authenticate(request);
+    await authenticate(request,env);
     if(url.pathname==='/config'){const keys=await signingKeys(env);return response({publicKey:keys.publicKey,hour:'09:00',timeZone:'America/Argentina/Buenos_Aires'});}
     const body=await jsonBody(request);requireValue(validSubscription(body.subscription),400,'El dispositivo no tiene una suscripción válida.');
     const deviceKey='device:'+await hash(body.subscription.endpoint);
