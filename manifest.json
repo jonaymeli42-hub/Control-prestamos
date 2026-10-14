@@ -8,8 +8,8 @@
   "scope": "https://jonaymeli42-hub.github.io/Control-prestamos/",
   "display": "standalone",
   "prefer_related_applications": false,
-  "background_color": "#f5f7fb",
-  "theme_color": "#f5f7fb",
+  "background_color": "#141c28",
+  "theme_color": "#141c28",
   "icons": [
     {
       "src": "icon-192.png",
