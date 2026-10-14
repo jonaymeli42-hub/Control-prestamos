@@ -847,7 +847,7 @@
     if (financing) syncFinancingPaid(financing);
     data.cardPayments = data.cardPayments.filter(item => item.id !== paymentId);
     data.movements = data.movements.filter(item => item.cardPaymentId !== paymentId);
-    if (financing) { syncFinancingPaid(financing); persist(); openFinancingDetail(financing.id); }
+    if (financing) { syncFinancingPaid(financing); persist(); render(); openFinancingDetail(financing.id); }
     else { persist(); closeModal(); render(); }
     showToast('Pago eliminado; la deuda pendiente se recalculó.');
   }
