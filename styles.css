@@ -439,3 +439,11 @@ html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#1029
 .home-add-actions .home-add-loan{flex:1.2;font-size:13px}.home-add-actions .home-add-financing{flex:1}
 
 .home-add-actions{gap:6px}.home-add-actions .home-add-loan{flex:1.25}.home-add-actions .home-add-financing{flex:1.15}.home-add-actions .home-add-income{display:flex;align-items:center;justify-content:center;gap:4px;flex:.8;min-width:0;min-height:46px;padding:10px 5px;border-radius:14px;font-size:12px}.home-add-actions .home-add-loan,.home-add-actions .home-add-financing{padding-inline:5px;gap:4px}
+
+/* Calendar colors distinguish money received, loans given and payments. */
+.calendar-event-toggle .calendar-financing-title{color:#08769b}
+.calendar-event-toggle .calendar-delivery-title{color:#8a6200}
+.badge.financing-received{color:#245cc2;background:#e6efff}
+:root[data-theme="dark"] .calendar-event-toggle .calendar-financing-title{color:#82d8f5}
+:root[data-theme="dark"] .calendar-event-toggle .calendar-delivery-title{color:#f4d36b}
+:root[data-theme="dark"] .badge.financing-received{color:#a8c6ff;background:#253b60}

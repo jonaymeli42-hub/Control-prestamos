@@ -486,6 +486,7 @@
   }
 
   function calendarReferenceClass(event) {
+    if (event.label === 'Financiación recibida') return 'card-ref';
     if (event.kind === 'income') return 'income-ref';
     if (event.kind === 'expense') return 'expense-ref';
     if (event.kind === 'card-payment' || event.kind === 'card-transaction') return ['Realizado', 'Pagado', 'Pagada'].includes(event.status) ? 'loan-paid-ref' : 'card-ref';
@@ -545,9 +546,11 @@
     const key = `${event.kind}:${event.id}`;
     const expanded = calendarExpandedEvent === key;
     const state = event.status || (event.kind === 'card-payment' ? 'Pendiente' : event.kind === 'delivery' ? 'Realizado' : 'Registrado');
-    const completedCard = ['card-payment', 'card-transaction'].includes(event.kind) && ['Realizado', 'Pagado', 'Pagada'].includes(state);
+    const receivedFinancing = event.label === 'Financiación recibida';
+    const titleClass = receivedFinancing ? 'calendar-financing-title' : event.label === 'Préstamo dado' ? 'calendar-delivery-title' : '';
+    const completedCard = !receivedFinancing && ['card-payment', 'card-transaction'].includes(event.kind) && ['Realizado', 'Pagado', 'Pagada'].includes(state);
     const colorKind = ['card-payment', 'card-transaction'].includes(event.kind) ? 'card' : ['income', 'expense', 'movement'].includes(event.kind) ? 'movement' : 'loan';
-    return `<article class="card calendar-event-card event-${colorKind} ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" aria-expanded="${expanded}"><span><strong>${escapeHtml(event.label)}</strong><small>${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })} · ${label}</small></span><span class="calendar-event-summary"><b>${money(event.amount)}</b><i class="badge ${completedCard ? 'paid' : ''}">${escapeHtml(state)}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Nombre / identificador</span><b>${escapeHtml(event.detail)}</b></div><div class="kv"><span>Tipo</span><b>${label}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(event.date, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe</span><b>${money(event.amount)}</b></div><div class="kv"><span>Estado</span><b>${escapeHtml(state)}</b></div></div><button class="secondary-button full" data-action="calendar-event-detail" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}">Ver detalle completo ›</button></div>` : ''}</article>`;
+    return `<article class="card calendar-event-card event-${colorKind} ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" aria-expanded="${expanded}"><span><strong class="${titleClass}">${escapeHtml(event.label)}</strong><small>${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })} · ${label}</small></span><span class="calendar-event-summary"><b>${money(event.amount)}</b><i class="badge ${receivedFinancing && state === 'Realizado' ? 'financing-received' : completedCard ? 'paid' : ''}">${escapeHtml(state)}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Nombre / identificador</span><b>${escapeHtml(event.detail)}</b></div><div class="kv"><span>Tipo</span><b>${label}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(event.date, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe</span><b>${money(event.amount)}</b></div><div class="kv"><span>Estado</span><b>${escapeHtml(state)}</b></div></div><button class="secondary-button full" data-action="calendar-event-detail" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}">Ver detalle completo ›</button></div>` : ''}</article>`;
   }
 
   function openCalendarEvent(kind, eventId) {
