@@ -60,6 +60,14 @@
     root.dataset.theme = resolved;
     root.style.colorScheme = resolved;
     document.body.dataset.theme = resolved;
+    // Keep Android/browser chrome aligned with the selected appearance.
+    document.documentElement.style.colorScheme = resolved;
+    document.documentElement.style.backgroundColor = resolved === 'dark' ? '#141c28' : '#f5f7fb';
+    let scheme = document.querySelector('meta[name="color-scheme"]');
+    if (!scheme) { scheme = document.createElement('meta'); scheme.name = 'color-scheme'; document.head.append(scheme); }
+    scheme.content = resolved;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#141c28' : '#f5f7fb');
+
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#141c28' : '#f5f7fb');
     const themeToggle = document.querySelector('#theme-toggle');
     if (themeToggle) {
