@@ -33,3 +33,15 @@ test('primer vencimiento: mes siguiente con fin de mes y cambio de año',()=>{
  assert.equal(F.nextMonthDate('2026-12-15'),'2027-01-15');
  assert.equal(F.nextMonthDate('2026-02-30'),'');
 });
+
+test('cuotas normales recibidas: un mes con o sin interés y reparto exacto del capital',()=>{
+ const f={...base,repaymentMode:'installments',receivedAmount:100000,monthCount:1};
+ assert.equal(F.schedule(f)[0].amount,110000);
+ assert.equal(F.schedule({...f,interestValue:0})[0].amount,100000);
+ const rows=F.schedule({...f,receivedAmount:100,monthCount:3,interestValue:0});
+ assert.deepEqual(rows.map(r=>r.amount),[33.34,33.33,33.33]);
+ assert.equal(rows.reduce((s,r)=>s+Math.round(r.capital*100),0),10000);
+ const paid=F.schedule({...f,receivedAmount:100,monthCount:3,interestValue:0,paid:40});
+ assert.equal(paid[0].remaining,0);assert.equal(paid[1].remaining,26.67);
+ assert.equal(F.totals({...f,monthCount:3}).total,130000);
+});

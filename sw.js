@@ -1,5 +1,5 @@
-const CACHE_NAME = 'control-prestamos-shell-v18';
-const SHELL_FILES = ['./index.html', './styles.css', './app.js', './push-reminders.js?v=morning-1', './financing-model.js?v=financing-navigation-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
+const CACHE_NAME = 'control-prestamos-shell-v19';
+const SHELL_FILES = ['./index.html', './styles.css', './app.js', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

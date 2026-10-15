@@ -11,20 +11,22 @@
     const [y,m,d]=parts,target=new Date(y,m,1),day=Math.min(d,new Date(target.getFullYear(),target.getMonth()+1,0).getDate());
     return `${target.getFullYear()}-${String(target.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   }
-  const isMonthly = f => f?.repaymentMode === 'monthly-bullet';
+  const isInstallments = f => f?.repaymentMode === 'installments';
+  const isMonthly = f => f?.repaymentMode === 'monthly-bullet' || isInstallments(f);
   const valid = f => !!dateParts(f.firstDueDate) && !!dateParts(f.receivedDate) && f.firstDueDate >= f.receivedDate && Number.isFinite(f.receivedAmount) && f.receivedAmount > 0 && Number.isFinite(f.interestValue) && f.interestValue >= 0 && Number.isInteger(f.monthCount) && f.monthCount >= 1 && f.monthCount <= 240 && typeof f.card === 'string' && f.card.trim().length > 0 && f.card.length <= 100 && Number.isSafeInteger(Math.round((f.receivedAmount + round(f.receivedAmount * f.interestValue / 100) * f.monthCount) * 100));
   function schedule(f) {
     if (!isMonthly(f) || !valid(f)) return [];
     const [y,m,d] = dateParts(f.firstDueDate), interest = round(f.receivedAmount * f.interestValue / 100);
+    const principalCents = Math.round(f.receivedAmount*100);
     let paidCents = Math.max(0,Math.round(Number(f.paid || 0)*100));
     return Array.from({length:f.monthCount},(_,index) => {
       const target = new Date(y,m-1+index,1), day = Math.min(d,new Date(target.getFullYear(),target.getMonth()+1,0).getDate());
       const date = `${target.getFullYear()}-${String(target.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-      const capital = index === f.monthCount-1 ? round(f.receivedAmount) : 0, amount = round(interest+capital);
+      const capital = isInstallments(f) ? (Math.floor(principalCents/f.monthCount) + (index < principalCents%f.monthCount ? 1 : 0))/100 : index === f.monthCount-1 ? round(f.receivedAmount) : 0, amount = round(interest+capital);
       const cents = Math.round(amount*100), applied = Math.min(paidCents,cents);paidCents -= applied;
       return {number:index+1,date,interest,capital,amount,paid:applied/100,remaining:(cents-applied)/100};
     });
   }
   function totals(f) {const rows=schedule({...f,paid:0});return {interest:round(rows.reduce((n,r)=>n+r.interest,0)),total:round(rows.reduce((n,r)=>n+r.amount,0)),monthlyInterest:rows[0]?.interest || 0};}
-  globalThis.ReceivedFinancing = {isMonthly,valid,schedule,totals,nextMonthDate};
+  globalThis.ReceivedFinancing = {isMonthly,isInstallments,valid,schedule,totals,nextMonthDate};
 })();
