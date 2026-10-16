@@ -965,7 +965,7 @@
       <div class="field full-span historical-toggle"><label for="loan-historical"><input id="loan-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Préstamo histórico</label><span class="field-help">No descuenta el capital del dinero actual ni genera un movimiento de entrega. Los pagos y cuotas existentes se conservan.</span></div>
       ${existing ? '' : `<div class="field full-span" id="loan-historical-paid-field" hidden><label for="loan-historical-paid-count">Cuotas ya pagadas antes de usar la aplicación</label><input id="loan-historical-paid-count" name="historicalPaidCount" type="number" min="0" max="240" step="1" value="0" disabled><span class="field-help">Se marcarán como históricas las primeras cuotas del cronograma.</span></div>`}
       <div class="field full-span"><label for="loan-notes">Descripción</label><textarea id="loan-notes" name="notes" maxlength="1000" placeholder="Detalle opcional">${escapeHtml(existing?.notes || '')}</textarea></div>
-      </div><p class="field-help">En cuotas normales, la tasa es mensual y se calcula por la cantidad de meses. En interés mensual + capital final se cobra el interés mensual y el capital al final.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar préstamo'}</button></div></form>`;
+      </div><p class="field-help">En préstamo corto semanal, la tasa es mensual: se prorratea por los días desde la entrega hasta el último vencimiento, usando un mes de 4 semanas (28 días). Al guardar un préstamo corto anterior se recalculan sus cuotas, conservando los cobros. En cuotas normales, la tasa es mensual y se calcula por la cantidad de meses. En interés mensual + capital final se cobra el interés mensual y el capital al final.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar préstamo'}</button></div></form>`;
     openModal(existing ? `Editar préstamo ${existing.code}` : 'Agregar préstamo', existing ? existing.person : 'Completá los datos y generaremos las cuotas.', body);
     const form = modalRoot.querySelector('#loan-form');
     form.addEventListener('submit', saveLoan);
@@ -1138,7 +1138,7 @@
     persist(); closeModal(); page = 'loans'; loanFilter = 'Todos'; render(); showToast(existing ? 'Préstamo actualizado; cuotas y pagos conservados.' : 'Préstamo histórico guardado sin crear movimientos.');
   }
 
-  function calculateSchedule({ capital, rate, count, mode, firstDue }) {
+  function calculateSchedule({ capital, rate, count, mode, firstDue, deliveryDate }) {
     const periods = mode === '1 cuota' ? 1 : count;
     const rateDecimal = rate / 100;
     let values;
@@ -1146,7 +1146,11 @@
       const interest = roundMoney(capital * rateDecimal);
       values = Array.from({ length: periods }, (_, index) => roundMoney(interest + (index === periods - 1 ? capital : 0)));
     } else {
-      const total = mode === 'Cuotas normales'
+      // Short loans use a four-week month; count actual days through the last weekly due date.
+      const shortDays = mode === 'Préstamo corto semanal' ? (Date.parse(firstDue + 'T00:00:00Z') - Date.parse(deliveryDate + 'T00:00:00Z')) / 86400000 + (periods - 1) * 7 : 0;
+      const total = mode === 'Préstamo corto semanal'
+        ? roundMoney(capital + capital * rateDecimal * shortDays / 28)
+        : mode === 'Cuotas normales'
         ? roundMoney(capital + capital * rateDecimal * periods)
         : roundMoney(capital * (1 + rateDecimal));
       const wholeTotal = Math.round(total);
@@ -1179,7 +1183,7 @@
         return { error: `No se puede reducir la cantidad de cuotas: la cuota ${row.number} ya tiene pagos vinculados.` };
       }
     }
-    const calculated = calculateSchedule({ capital: nextLoan.capital, rate: nextLoan.rate, count: nextCount, mode: nextLoan.mode, firstDue: nextLoan.firstDue });
+    const calculated = calculateSchedule({ capital: nextLoan.capital, rate: nextLoan.rate, count: nextCount, mode: nextLoan.mode, firstDue: nextLoan.firstDue, deliveryDate: nextLoan.deliveryDate });
     const byNumber = new Map(oldRows.map(row => [row.number, row]));
     for (const proposed of calculated) {
       const old = byNumber.get(proposed.number);
@@ -1220,7 +1224,7 @@
     const historical = event.currentTarget.elements.historical?.checked === true;
     const historicalPaidCount = historical && !existing ? Number(form.get('historicalPaidCount')) : Number(existing?.historicalPaidCount) || 0;
     const scheduleCount = mode === '1 cuota' ? 1 : count;
-    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate)) {
+    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate) || (mode === 'Préstamo corto semanal' && firstDue <= deliveryDate)) {
       showToast('Revisá capital, tasa, cuotas y vencimiento.'); return;
     }
     if (historical && (!Number.isInteger(historicalPaidCount) || historicalPaidCount < 0 || historicalPaidCount > scheduleCount)) {
@@ -1234,10 +1238,11 @@
       firstDueManual: event.currentTarget.elements.firstDue.dataset.manual === 'true',
       notes: String(form.get('notes')).trim(), createdAt: existing?.createdAt || new Date().toISOString(), deliveryDate,
       disbursed: historical ? true : existing ? (existing.disbursed !== false || deliveryDate <= todayKey()) : deliveryDate <= todayKey(),
-      historical, rateRecorded: historical ? true : existing?.rateRecorded || false, historicalPaidCount
+      historical, rateRecorded: historical ? true : existing?.rateRecorded || false, historicalPaidCount,
+      ...(mode === 'Préstamo corto semanal' ? {shortInterestVersion:1} : {})
     };
     if (existing) {
-      const affectsSchedule = ['capital', 'rate', 'count', 'mode', 'firstDue'].some(key => String(existing[key] ?? '') !== String(loan[key] ?? ''));
+      const affectsSchedule = ['capital', 'rate', 'count', 'mode', 'firstDue'].some(key => String(existing[key] ?? '') !== String(loan[key] ?? '')) || (mode === 'Préstamo corto semanal' && (existing.deliveryDate !== deliveryDate || existing.shortInterestVersion !== 1));
       if (affectsSchedule) {
         const result = reconcileInstallments(existing, loan);
         if (result.error) { showToast(result.error); return; }
@@ -1247,7 +1252,7 @@
       persist(); closeModal(); page = 'loans'; render(); showToast('Préstamo actualizado; los pagos existentes se conservaron.');
       return;
     }
-    const schedule = calculateSchedule({ capital: loan.capital, rate, count: loan.count, mode, firstDue }).map((item, index) => ({
+    const schedule = calculateSchedule({ capital: loan.capital, rate, count: loan.count, mode, firstDue, deliveryDate }).map((item, index) => ({
       ...item,
       loanId: loan.id,
       ...(historical && index < historicalPaidCount ? { paid: item.amount, paidBeforeApp: item.amount, status: 'Pagado' } : {})
