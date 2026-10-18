@@ -450,3 +450,5 @@ html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#1029
 
 .salary-transfer-row{display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;margin:12px 0;color:inherit}.salary-transfer-row span{min-width:0;overflow-wrap:anywhere}.salary-transfer-row small{display:block;margin-top:6px;font-weight:400}.salary-transfer-row b{white-space:nowrap}.salary-transfer-row strong{font-size:16px}
 @media(max-width:420px){.salary-transfer-row{flex-wrap:wrap}}
+
+.bottom-nav{grid-template-columns:repeat(7,minmax(0,1fr))}.bottom-nav .tab-label{font-size:clamp(8px,1.9vw,11px)}
