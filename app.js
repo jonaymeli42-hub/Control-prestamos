@@ -5,6 +5,7 @@
   const S = window.SalarySavings;
   let salaryMonth = todayKey().slice(0,7);
   let generalFilter='all';
+  let movementSection='loans';
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
   const VALID_THEMES = ['light', 'dark'];
@@ -407,7 +408,7 @@
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
       <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
-      <section class="section"><div class="card"><h3>Sueldo ↔ Préstamos</h3><p class="subtle">Ahorro neto de este mes</p><strong class="amount">${money(S.monthly(data.movements,todayKey().slice(0,7)).net)}</strong><button class="secondary-button full" style="margin-top:14px" data-page="general">Ver meses y registrar pases ›</button></div></section>
+      <section class="section"><div class="card"><h3>Sueldo ↔ Préstamos</h3><p class="subtle">Ahorro neto de este mes</p><strong class="amount">${money(S.monthly(data.movements,todayKey().slice(0,7)).net)}</strong><button class="secondary-button full" style="margin-top:14px" data-page="movements" data-section="general">Ver meses y registrar pases ›</button></div></section>
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
@@ -635,10 +636,14 @@
   }
 
   function renderMovements() {
-    const items = [...data.movements].filter(item => movementFilter === 'Todos' || movementCategory(item) === movementFilter || (movementFilter === 'cobros' && movementCategory(item) === 'partial-payments')).sort((a, b) => movementDisplayDate(b).localeCompare(movementDisplayDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const selector=`<label class="field movement-section-picker">Ver movimientos<select id="movement-section"><option value="loans" ${movementSection==='loans'?'selected':''}>Préstamos y financiaciones</option><option value="general" ${movementSection==='general'?'selected':''}>Generales · sueldo, ingresos y pagos</option><option value="all" ${movementSection==='all'?'selected':''}>Todos los movimientos</option></select></label>`;
+    return selector+(movementSection==='general'?renderSalarySavings():renderFinancialMovements());
+  }
+  function renderFinancialMovements() {
+    const items = [...data.movements].filter(item => (movementSection==='all'||!isManualMovement(item))).filter(item => movementFilter === 'Todos' || movementCategory(item) === movementFilter || (movementFilter === 'cobros' && movementCategory(item) === 'partial-payments')).sort((a, b) => movementDisplayDate(b).localeCompare(movementDisplayDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
     const directionLabel = direction => direction === 'in' ? 'Entrada' : 'Salida';
-    const filters = [['Todos', 'Todos'], ['Cobros', 'cobros'], ['Pagos parciales', 'partial-payments'], ['Préstamos dados', 'loans-out'], ['Ingresos generales', 'income'], ['Gastos generales', 'expenses'], ['Sueldo ↔ Préstamos', 'salary']];
-    return `${pageHeading('Movimientos', `${data.movements.length} registros`, '<button class="primary-button" data-action="new-movement">＋ Registrar</button>')}
+    const filters = [['Todos', 'Todos'], ['Cobros', 'cobros'], ['Pagos parciales', 'partial-payments'], ['Préstamos dados', 'loans-out'], ['Ingresos generales', 'income'], ['Gastos generales', 'expenses'], ['Sueldo ↔ Préstamos', 'salary']].filter(([,value])=>movementSection==='all'||!['salary','income','expenses'].includes(value));
+    return `${pageHeading('Movimientos', `${items.length} registros`, '<button class="primary-button" data-action="new-movement">＋ Registrar</button>')}
       <div class="filter-row">${filters.map(([label, value]) => `<button class="filter-chip ${movementFilter === value ? 'active' : ''}" data-action="movement-filter" data-value="${value}">${label}</button>`).join('')}</div>
       ${items.length ? `<div class="list">${items.map(item => `<article class="card movement-card" data-action="movement-detail" data-id="${escapeHtml(item.id)}"><div class="row-top"><div><div class="person">${escapeHtml(displayMovementType(item))}</div><div class="subtle">${formatDate(movementDisplayDate(item), { day: 'numeric', month: 'short', year: 'numeric' })}${item.person ? ` · ${escapeHtml(item.person)}` : ''}</div></div><div class="amount ${item.direction === 'in' ? 'movement-in' : 'movement-out'}">${item.direction === 'in' ? '+' : '−'}${money(item.amount)}</div></div><div class="inline-details"><span>${directionLabel(item.direction)}</span>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${item.status === 'Pendiente' ? '<span class="badge pending">Programado</span>' : ''}</div></article>`).join('')}</div>` : emptyState('↔', 'Sin movimientos en esta categoría', 'Los movimientos de préstamos y los ingresos o gastos registrados aparecerán acá.', '<button class="primary-button" data-action="new-movement">Registrar movimiento</button>')}`;
   }
@@ -1666,7 +1671,7 @@
 
   document.addEventListener('click', async event => {
     const pageButton = event.target.closest('[data-page]');
-    if (pageButton) { page = pageButton.dataset.page; render(); return; }
+    if (pageButton) { page = pageButton.dataset.page; if(pageButton.dataset.section)movementSection=pageButton.dataset.section;render(); return; }
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const action = button.dataset.action;
@@ -1753,6 +1758,7 @@
     event.preventDefault(); changeSetting(form);
   });
   document.addEventListener('change', event => {
+    if(event.target.id==='movement-section'){movementSection=event.target.value;movementFilter='Todos';render();return;}
     if(event.target.id==='salary-month' && /^\d{4}-\d{2}$/.test(event.target.value)){salaryMonth=event.target.value;render();return;}
     if (event.target.id === 'backup-file') importBackup(event.target.files?.[0]);
   });
