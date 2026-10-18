@@ -447,3 +447,6 @@ html[data-theme="dark"] .bottom-nav button.active{background:#8ed5b5;color:#1029
 :root[data-theme="dark"] .calendar-event-toggle .calendar-financing-title{color:#82d8f5}
 :root[data-theme="dark"] .calendar-event-toggle .calendar-delivery-title{color:#f4d36b}
 :root[data-theme="dark"] .badge.financing-received{color:#a8c6ff;background:#253b60}
+
+.salary-transfer-row{display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;margin:12px 0;color:inherit}.salary-transfer-row span{min-width:0;overflow-wrap:anywhere}.salary-transfer-row small{display:block;margin-top:6px;font-weight:400}.salary-transfer-row b{white-space:nowrap}.salary-transfer-row strong{font-size:16px}
+@media(max-width:420px){.salary-transfer-row{flex-wrap:wrap}}

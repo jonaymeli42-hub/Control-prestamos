@@ -2,6 +2,8 @@
   'use strict';
 
   const F = window.ReceivedFinancing;
+  const S = window.SalarySavings;
+  let salaryMonth = todayKey().slice(0,7);
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
   const VALID_THEMES = ['light', 'dark'];
@@ -31,7 +33,7 @@
 
   let data = loadData();
   const startupParams = new URLSearchParams(window.location.search);
-  let page = ['home', 'loans', 'collections', 'calendar', 'movements', 'cards', 'more'].includes(startupParams.get('page')) ? startupParams.get('page') : 'home';
+  let page = ['home', 'loans', 'collections', 'calendar', 'movements', 'cards', 'more', 'salary'].includes(startupParams.get('page')) ? startupParams.get('page') : 'home';
   let calendarSelectedDate = parseDate(startupParams.get('date')) ? dateKey(startupParams.get('date')) : todayKey();
   let calendarMonth = new Date((parseDate(calendarSelectedDate) || new Date()).getFullYear(), (parseDate(calendarSelectedDate) || new Date()).getMonth(), 1);
   let calendarExpandedEvent = '';
@@ -347,6 +349,7 @@
     });
   }
   function movementCategory(item) {
+    if(S.isTransfer(item)) return 'salary';
     if (item.type === 'Cobro préstamo') {
       const payment = data.collections.find(row => row.id === item.collectionId);
       const installment = payment && data.installments.find(row => row.id === payment.installmentId);
@@ -383,7 +386,7 @@
   function render() {
     document.getElementById("quick-add").hidden = page === "home";
     document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.page === page));
-    const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, cards: renderCards, more: renderMore };
+    const views = { home: renderHome, loans: renderLoans, collections: renderCollections, calendar: renderCalendar, movements: renderMovements, cards: renderCards, more: renderMore, salary: renderSalarySavings };
     app.innerHTML = (views[page] || renderHome)();
   }
 
@@ -403,10 +406,22 @@
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
       <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
+      <section class="section"><div class="card"><h3>Sueldo ↔ Préstamos</h3><p class="subtle">Ahorro neto de este mes</p><strong class="amount">${money(S.monthly(data.movements,todayKey().slice(0,7)).net)}</strong><button class="secondary-button full" style="margin-top:14px" data-page="salary">Ver meses y registrar pases ›</button></div></section>
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
       `;
+  }
+
+  function renderSalarySavings() {
+    const summary=S.monthly(data.movements,salaryMonth);
+    return `${pageHeading('Sueldo ↔ Préstamos','Lo que pasaste de tu sueldo menos lo que devolviste al sueldo.','<button class="text-button" data-page="home">Volver al inicio</button>')}
+      <label class="field">Mes<input id="salary-month" type="month" value="${escapeHtml(salaryMonth)}"></label>
+      <section class="card kv-list"><div class="kv"><span>Del sueldo a Préstamos</span><b>${money(summary.received)}</b></div><div class="kv"><span>De Préstamos al sueldo</span><b>${money(summary.returned)}</b></div><div class="kv"><span>Ahorro neto del mes</span><b class="${summary.net>=0?'movement-in':'movement-out'}">${money(summary.net)}</b></div></section>
+      <p class="subtle">Se cuentan solo los pases realizados en este mes. Un resultado negativo significa que retiraste más de lo que aportaste. No incluye cobros ni intereses de préstamos.</p>
+      <div class="form-actions"><button class="primary-button" data-action="salary-in">＋ Del sueldo a Préstamos</button><button class="secondary-button" data-action="salary-out">Devolver al sueldo</button></div>
+      <p class="subtle">Cada pase modifica el dinero actual de Préstamos. No se registra automáticamente en Control Gastos. Si ya lo cargaste como ingreso o gasto general, editá ese movimiento y cambiá su tipo para no duplicarlo.</p>
+      <section class="section"><h3>Detalle del mes</h3>${summary.items.length?summary.items.map(row=>`<button class="card full salary-transfer-row" data-action="movement-detail" data-id="${escapeHtml(row.id)}"><span><strong>${escapeHtml(row.type)}</strong><small>${formatDate(row.date)} · ${escapeHtml(row.description)}</small></span><b class="${row.direction==='in'?'movement-in':'movement-out'}">${row.direction==='in'?'+':'−'}${money(row.amount)}</b></button>`).join(''):'<p class="subtle">No hay pases realizados este mes.</p>'}</section>`;
   }
 
   function renderUpcomingCollections(installments, dates) {
@@ -617,7 +632,7 @@
   function renderMovements() {
     const items = [...data.movements].filter(item => movementFilter === 'Todos' || movementCategory(item) === movementFilter || (movementFilter === 'cobros' && movementCategory(item) === 'partial-payments')).sort((a, b) => movementDisplayDate(b).localeCompare(movementDisplayDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
     const directionLabel = direction => direction === 'in' ? 'Entrada' : 'Salida';
-    const filters = [['Todos', 'Todos'], ['Cobros', 'cobros'], ['Pagos parciales', 'partial-payments'], ['Préstamos dados', 'loans-out'], ['Ingresos generales', 'income'], ['Gastos generales', 'expenses']];
+    const filters = [['Todos', 'Todos'], ['Cobros', 'cobros'], ['Pagos parciales', 'partial-payments'], ['Préstamos dados', 'loans-out'], ['Ingresos generales', 'income'], ['Gastos generales', 'expenses'], ['Sueldo ↔ Préstamos', 'salary']];
     return `${pageHeading('Movimientos', `${data.movements.length} registros`, '<button class="primary-button" data-action="new-movement">＋ Registrar</button>')}
       <div class="filter-row">${filters.map(([label, value]) => `<button class="filter-chip ${movementFilter === value ? 'active' : ''}" data-action="movement-filter" data-value="${value}">${label}</button>`).join('')}</div>
       ${items.length ? `<div class="list">${items.map(item => `<article class="card movement-card" data-action="movement-detail" data-id="${escapeHtml(item.id)}"><div class="row-top"><div><div class="person">${escapeHtml(displayMovementType(item))}</div><div class="subtle">${formatDate(movementDisplayDate(item), { day: 'numeric', month: 'short', year: 'numeric' })}${item.person ? ` · ${escapeHtml(item.person)}` : ''}</div></div><div class="amount ${item.direction === 'in' ? 'movement-in' : 'movement-out'}">${item.direction === 'in' ? '+' : '−'}${money(item.amount)}</div></div><div class="inline-details"><span>${directionLabel(item.direction)}</span>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${item.status === 'Pendiente' ? '<span class="badge pending">Programado</span>' : ''}</div></article>`).join('')}</div>` : emptyState('↔', 'Sin movimientos en esta categoría', 'Los movimientos de préstamos y los ingresos o gastos registrados aparecerán acá.', '<button class="primary-button" data-action="new-movement">Registrar movimiento</button>')}`;
@@ -1368,18 +1383,18 @@
   }
 
   function isManualMovement(item) {
-    return ['Ingreso general', 'Gasto general'].includes(item?.type)
+    return ['Ingreso general', 'Gasto general', S.IN, S.OUT].includes(item?.type)
       && !item.loanId && !item.collectionId && !item.cardFinancingId && !item.cardPaymentId;
   }
 
-  function openMovementForm(movementId = '') {
+  function openMovementForm(movementId = '', presetType = '') {
     const item = movementId ? data.movements.find(row => row.id === movementId) : null;
     if (movementId && !isManualMovement(item)) return;
     const editing = Boolean(item);
     const date = item ? movementDisplayDate(item) : todayKey();
     const status = item ? (['Pendiente', 'Programado'].includes(item.status) ? 'Pendiente' : 'Realizado') : '';
-    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type"><option ${item?.type === 'Ingreso general' ? 'selected' : ''}>Ingreso general</option><option ${item?.type === 'Gasto general' ? 'selected' : ''}>Gasto general</option></select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-decimal-money-input inputmode="decimal" value="${item ? formatMovementAmount(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || '')}" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
-    openModal(editing ? 'Editar movimiento' : 'Ingreso o gasto general', 'Los movimientos generales no se asocian a préstamos.', body);
+    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type">${['Ingreso general','Gasto general',S.IN,S.OUT].map(type=>`<option ${type===(item?.type||presetType||'Ingreso general')?'selected':''}>${escapeHtml(type)}</option>`).join('')}</select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-decimal-money-input inputmode="decimal" value="${item ? formatMovementAmount(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || '')}" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
+    openModal(editing ? 'Editar movimiento' : presetType || 'Ingreso, gasto o pase', 'Los pases entre sueldo y Préstamos suman o restan dinero y aparecen en el ahorro neto mensual.', body);
     modalRoot.querySelector('#movement-form').addEventListener('submit', event => {
       event.preventDefault();
       const values = new FormData(event.currentTarget);
@@ -1387,14 +1402,14 @@
       const date = String(values.get('date'));
       const type = String(values.get('type'));
       const description = String(values.get('description')).trim();
-      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || !description || !['Ingreso general', 'Gasto general'].includes(type)) { showToast('Revisá el monto y la fecha.'); return; }
+      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || !description || !['Ingreso general', 'Gasto general',S.IN,S.OUT].includes(type)) { showToast('Revisá el monto y la fecha.'); return; }
       if (item) {
         const nextStatus = values.get('status') === 'Pendiente' ? 'Pendiente' : 'Realizado';
-        Object.assign(item, { type, date, scheduledDate: nextStatus === 'Pendiente' ? date : '', description, direction: type === 'Ingreso general' ? 'in' : 'out', amount, status: nextStatus });
+        Object.assign(item, { type, date, scheduledDate: nextStatus === 'Pendiente' ? date : '', description, direction: ['Ingreso general',S.IN].includes(type) ? 'in' : 'out', amount, status: nextStatus });
         persist(); closeModal(); render(); showToast('Movimiento actualizado.'); return;
       }
       const future = date > todayKey();
-      data.movements.unshift({ id: id(), type, date, scheduledDate: future ? date : '', createdAt: new Date().toISOString(), person: '', description, direction: type === 'Ingreso general' ? 'in' : 'out', amount, status: future ? 'Pendiente' : 'Realizado' });
+      data.movements.unshift({ id: id(), type, date, scheduledDate: future ? date : '', createdAt: new Date().toISOString(), person: '', description, direction: ['Ingreso general',S.IN].includes(type) ? 'in' : 'out', amount, status: future ? 'Pendiente' : 'Realizado' });
       persist(); closeModal(); render(); showToast(future ? 'Movimiento programado; todavía no afecta el dinero actual.' : 'Movimiento realizado y guardado.');
     });
   }
@@ -1412,7 +1427,7 @@
     const financingId = item.cardFinancingId || financingPayment?.financingId;
     const relatedFinancing = financingId && data.cardFinancings.find(row=>row.id===financingId);
     const manualActions = isManualMovement(item) ? `<div class="form-actions" style="margin-top:14px"><button class="secondary-button" data-action="edit-movement" data-id="${escapeHtml(item.id)}">Editar</button><button class="danger-button" data-action="delete-movement" data-id="${escapeHtml(item.id)}">Eliminar</button></div>` : '';
-    openModal(displayMovementType(item), formatDate(eventDate, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || item.person || '—')}</b></div><div class="kv"><span>Tipo</span><b>${item.direction === 'in' ? 'Ingreso' : 'Gasto'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${installment ? `<div class="kv"><span>Cuota</span><b>${installment.number} · ${money(installment.paid)} de ${money(installment.amount)} pagados</b></div>` : ''}${eventDate ? `<div class="kv"><span>Fecha prevista</span><b>${formatDate(eventDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${relatedLoan ? `<button class="secondary-button full" style="margin-top:14px" data-action="view-loan" data-id="${escapeHtml(relatedLoan.id)}">Ver préstamo ${escapeHtml(relatedLoan.code)}</button>` : ''}${relatedFinancing ? `<button class="secondary-button full" style="margin-top:14px" data-action="financing-detail" data-id="${escapeHtml(relatedFinancing.id)}">Ver financiación · ${escapeHtml(relatedFinancing.card)}</button>` : ''}${canRealize ? `<button class="primary-button full" style="margin-top:14px" data-action="realize-movement" data-id="${escapeHtml(item.id)}">${actionLabel}</button>` : ''}${financingPayment ? `<button class="danger-button full" style="margin-top:14px" data-action="delete-card-payment" data-id="${escapeHtml(financingPayment.id)}">Deshacer pago</button>` : ''}${manualActions}`);
+    openModal(displayMovementType(item), formatDate(eventDate, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || item.person || '—')}</b></div><div class="kv"><span>Tipo</span><b>${S.isTransfer(item)?'Pase con el sueldo':item.direction === 'in' ? 'Ingreso' : 'Gasto'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${installment ? `<div class="kv"><span>Cuota</span><b>${installment.number} · ${money(installment.paid)} de ${money(installment.amount)} pagados</b></div>` : ''}${eventDate ? `<div class="kv"><span>Fecha prevista</span><b>${formatDate(eventDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${relatedLoan ? `<button class="secondary-button full" style="margin-top:14px" data-action="view-loan" data-id="${escapeHtml(relatedLoan.id)}">Ver préstamo ${escapeHtml(relatedLoan.code)}</button>` : ''}${relatedFinancing ? `<button class="secondary-button full" style="margin-top:14px" data-action="financing-detail" data-id="${escapeHtml(relatedFinancing.id)}">Ver financiación · ${escapeHtml(relatedFinancing.card)}</button>` : ''}${canRealize ? `<button class="primary-button full" style="margin-top:14px" data-action="realize-movement" data-id="${escapeHtml(item.id)}">${actionLabel}</button>` : ''}${financingPayment ? `<button class="danger-button full" style="margin-top:14px" data-action="delete-card-payment" data-id="${escapeHtml(financingPayment.id)}">Deshacer pago</button>` : ''}${manualActions}`);
   }
 
   function deleteManualMovement(movementId) {
@@ -1461,6 +1476,7 @@
     if (!backup.data.installments.every(item => item && typeof item.id === 'string' && typeof item.loanId === 'string' && Number.isFinite(item.amount) && Number.isFinite(item.paid))) return false;
     if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
+    if(!backup.data.movements.every(item=>!S.isTransfer(item)||S.valid(item)))return false;
     for (const key of ['cardFinancings', 'cardPayments']) if (backup.data[key] !== undefined && !Array.isArray(backup.data[key])) return false;
     if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid) && (!F.isMonthly(item) || (F.valid(item) && Math.abs(F.totals(item).total-item.totalToRepay)<0.005 && item.paid>=0 && item.paid<=item.totalToRepay+0.005)))) return false;
     if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
@@ -1691,6 +1707,7 @@
     } else if (action === 'calendar-event-detail') openCalendarEvent(button.dataset.kind, button.dataset.id);
     else if (action === 'calendar-collect') openPayForm(button.dataset.id);
     else if (action === 'calendar-pay-card') openCardPaymentForm(button.dataset.id);
+    else if (action === 'salary-in' || action === 'salary-out') openMovementForm('',action==='salary-in'?S.IN:S.OUT);
     else if (action === 'new-movement' || action === 'new-income') openMovementForm();
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
@@ -1730,6 +1747,7 @@
     event.preventDefault(); changeSetting(form);
   });
   document.addEventListener('change', event => {
+    if(event.target.id==='salary-month' && /^\d{4}-\d{2}$/.test(event.target.value)){salaryMonth=event.target.value;render();return;}
     if (event.target.id === 'backup-file') importBackup(event.target.files?.[0]);
   });
   document.addEventListener('focusin', event => {
