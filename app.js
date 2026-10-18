@@ -6,6 +6,7 @@
   let salaryMonth = todayKey().slice(0,7);
   let generalFilter='all';
   let movementSection='loans';
+  let futureAmountHidden=false;try{futureAmountHidden=localStorage.getItem('control-prestamos-future-hidden')==='true';}catch(_){}
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
   const VALID_THEMES = ['light', 'dark'];
@@ -403,7 +404,7 @@
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
-        <button type="button" class="summary-card future future-history-trigger" data-action="future-history" aria-label="Ver historial del dinero a futuro"><span class="label">Dinero a futuro</span><span class="amount">${money(future)}</span><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span><span class="history-link">Ver historial ›</span></button>
+        <article class="summary-card future"><button type="button" class="future-visibility-toggle" data-action="toggle-future-visibility" aria-label="${futureAmountHidden?'Mostrar':'Ocultar'} dinero a futuro" aria-pressed="${futureAmountHidden}"><span class="label">Dinero a futuro</span><span class="amount">${futureAmountHidden?'$ ••••••':money(future)}</span><span class="visibility-help">${futureAmountHidden?'Mostrar importe':'Ocultar importe'}</span></button><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span><button type="button" class="history-link future-history-link" data-action="future-history">Ver historial ›</button></article>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
@@ -1675,7 +1676,8 @@
     const button = event.target.closest('[data-action]');
     if (!button) return;
     const action = button.dataset.action;
-    if (action === 'future-history') openFutureHistory();
+    if(action==='toggle-future-visibility'){futureAmountHidden=!futureAmountHidden;try{localStorage.setItem('control-prestamos-future-hidden',String(futureAmountHidden));}catch(_){}render();document.querySelector('[data-action="toggle-future-visibility"]')?.focus({preventScroll:true});}
+    else if (action === 'future-history') openFutureHistory();
     else if (action === 'save-future-amount') { if (recordFutureAmount('manual')) { openFutureHistory(); showToast('Monto guardado en el historial.'); } }
     else if (action === 'toggle-theme') toggleTheme();
     else if (action === 'use-loan-reference') {
