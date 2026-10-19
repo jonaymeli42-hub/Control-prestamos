@@ -53,3 +53,5 @@ celular. La llegada depende de Internet y los permisos del teléfono.
 Checks: `node --test tests/financing-model.test.cjs tests/push-worker.test.mjs
 tests/push-service-worker.test.cjs`. La entrega real requiere configurar el
 Worker, KV y cron en Cloudflare y activar/probar desde el teléfono del usuario.
+
+En **Movimientos → Resumen mensual · cobros y pagos** se puede consultar cualquier mes, incluidos los futuros. Se distinguen cobros de préstamos, pagos de financiación y nuevas entregas, cada uno realizado y pendiente. La diferencia compara cobros y pagos de financiación antes de nuevas entregas; no representa saldo disponible ni Dinero a futuro. Los registros realizados se agrupan por fecha real y los pendientes por vencimiento, sin duplicar movimientos vinculados ni atribuir pagos históricos sin fecha a un mes. Esta vista es de solo lectura.

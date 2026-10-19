@@ -7,6 +7,7 @@
   let generalFilter='all';
   let movementSection='loans';
   let financingMonth=todayKey().slice(0,7);
+  let summaryMonth=todayKey().slice(0,7);
   let futureAmountHidden=false;try{futureAmountHidden=localStorage.getItem('control-prestamos-future-hidden')==='true';}catch(_){}
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
@@ -639,8 +640,23 @@
   }
 
   function renderMovements() {
-    const selector=`<label class="field movement-section-picker">Ver movimientos<select id="movement-section"><option value="loans" ${movementSection==='loans'?'selected':''}>Préstamos y financiaciones</option><option value="general" ${movementSection==='general'?'selected':''}>Generales · sueldo, ingresos y pagos</option><option value="all" ${movementSection==='all'?'selected':''}>Todos los movimientos</option></select></label>`;
-    return selector+(movementSection==='general'?renderSalarySavings():renderFinancialMovements());
+    const selector=`<label class="field movement-section-picker">Ver movimientos<select id="movement-section"><option value="loans" ${movementSection==='loans'?'selected':''}>Préstamos y financiaciones</option><option value="summary" ${movementSection==='summary'?'selected':''}>Resumen mensual · cobros y pagos</option><option value="general" ${movementSection==='general'?'selected':''}>Generales · sueldo, ingresos y pagos</option><option value="all" ${movementSection==='all'?'selected':''}>Todos los movimientos</option></select></label>`;
+    return selector+(movementSection==='summary'?renderMonthlySummary():movementSection==='general'?renderSalarySavings():renderFinancialMovements());
+  }
+  function renderMonthlySummary() {
+    const report=window.MonthlySummary.build(data,summaryMonth,window.FinancingOverview,F);
+    const current=todayKey().slice(0,7),next=addDate(current+'-01',0,1).slice(0,7);
+    const amount=n=>money(n);
+    const cards=[['collections','Cobros de préstamos','Cobrado','Pendiente de cobro'],['financing','Pagos de financiación','Pagado','Pendiente de pago'],['lent','Nuevos préstamos','Entregado','Programado']];
+    return `${pageHeading('Resumen mensual','Cobros, pagos de financiación y dinero que volvés a prestar.')}
+      <div class="financing-month-tabs">${[[current,'Este mes'],[next,'Próximo mes']].map(([month,label])=>`<button type="button" data-action="summary-month" data-month="${month}" aria-pressed="${summaryMonth===month}" class="${summaryMonth===month?'active':''}"><strong>${label}</strong><span>${formatDate(month+'-01',{month:'long'})}</span></button>`).join('')}</div>
+      <label class="field">Consultar mes<input id="summary-month" type="month" value="${summaryMonth}"></label>
+      <h3>${formatDate(summaryMonth+'-01',{month:'long',year:'numeric'})}</h3>
+      <div class="list">${cards.map(([key,title,actual,pending])=>`<article class="card"><h3>${title}</h3><div class="kv-list"><div class="kv"><span>${actual}</span><b>${amount(report.totals[key].actual)}</b></div><div class="kv"><span>${pending}</span><b>${amount(report.totals[key].pending)}</b></div><div class="kv"><span>Total realizado + pendiente</span><b>${amount(report.totals[key].actual+report.totals[key].pending)}</b></div></div></article>`).join('')}
+      <article class="card"><h3>Cobros menos pagos de financiación</h3><div class="kv-list"><div class="kv"><span>Diferencia realizada</span><b>${amount(report.actualDifference)}</b></div><div class="kv"><span>Diferencia prevista del mes</span><b>${amount(report.projectedDifference)}</b></div></div><p class="subtle">Antes de entregar nuevos préstamos. No es tu saldo disponible ni Dinero a futuro.</p></article></div>
+      <p class="subtle">Lo realizado usa la fecha real del cobro o pago. Lo pendiente usa el vencimiento de las cuotas cargadas; puede cambiar si registrás pagos o nuevos préstamos. No incluye sueldo ni ingresos o gastos generales. Los pagos históricos sin registro de fecha no se asignan a un mes.</p>
+      ${report.undated?`<p class="subtle">Hay ${amount(report.undated)} sin fecha válida, fuera de los totales mensuales.</p>`:''}
+      <details class="card monthly-detail"><summary>Ver detalle del mes · ${report.rows.length} registros</summary><div class="list">${report.rows.map(r=>`<article><div class="row-top"><strong>${escapeHtml(r.label)}</strong><b>${amount(r.amount)}</b></div><p class="subtle">${formatDate(r.date,{day:'numeric',month:'short'})} · ${r.kind==='collections'?'Cobro':r.kind==='financing'?'Pago de financiación':'Préstamo dado'} · ${r.state==='pending'?'Pendiente':'Realizado'}</p></article>`).join('')||'<p class="subtle">Sin cobros ni pagos registrados o previstos para este mes.</p>'}</div></details>`;
   }
   function renderFinancialMovements() {
     const items = [...data.movements].filter(item => (movementSection==='all'||!isManualMovement(item))).filter(item => movementFilter === 'Todos' || movementCategory(item) === movementFilter || (movementFilter === 'cobros' && movementCategory(item) === 'partial-payments')).sort((a, b) => movementDisplayDate(b).localeCompare(movementDisplayDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -1766,6 +1782,7 @@
     else if(action==='salary-detail') document.getElementById('salary-details')?.scrollIntoView({behavior:'smooth',block:'start'});
     else if(['salary-in','salary-out','salary-return','salary-save'].includes(action)) openMovementForm('',({'salary-in':S.IN,'salary-out':S.OUT,'salary-return':S.RETURN,'salary-save':S.SAVE})[action]);
     else if (action === 'new-movement' || action === 'new-income') openMovementForm();
+    else if(action==='summary-month'){summaryMonth=button.dataset.month;render();}
     else if(action==='financing-month'){financingMonth=button.dataset.month;render();}
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
@@ -1805,6 +1822,7 @@
     event.preventDefault(); changeSetting(form);
   });
   document.addEventListener('change', event => {
+    if(event.target.id==='summary-month' && /^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)){summaryMonth=event.target.value;render();return;}
     if(event.target.id==='financing-month' && /^\d{4}-\d{2}$/.test(event.target.value)){financingMonth=event.target.value;render();return;}
     if(event.target.id==='movement-section'){movementSection=event.target.value;movementFilter='Todos';render();return;}
     if(event.target.id==='salary-month' && /^\d{4}-\d{2}$/.test(event.target.value)){salaryMonth=event.target.value;render();return;}
