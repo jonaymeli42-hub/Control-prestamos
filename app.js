@@ -1018,6 +1018,7 @@
   function openLoanForm(loanId = '') {
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
+    if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
     const deliveryDate = existing?.deliveryDate || todayKey();
     const firstDue = existing?.firstDue || addDate(deliveryDate, 0, 1);
     const body = `<form id="loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="form-grid">
@@ -1100,6 +1101,7 @@
   function openHistoricalLoanForm(loanId = '') {
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
+    if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
     const existingRows = existing ? loanInstallments(existing.id).sort((a, b) => a.number - b.number).map(item => ({ dueDate: item.dueDate, amount: formatIntegerInput(item.amount), state: Number(item.paid) >= Number(item.amount) ? 'paid' : Number(item.paid) > 0 ? 'partial' : 'pending', paid: formatIntegerInput(item.paid) })) : [];
     const body = `<form id="historical-loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="alert">Este registro conserva los importes y vencimientos reales de cada cuota.</div><div class="form-grid">
       <div class="field"><label for="historical-code">Código / referencia</label><input id="historical-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80"></div>
@@ -1330,6 +1332,29 @@
     persist(); closeModal(); page = 'loans'; render(); showToast(historical ? `Préstamo histórico guardado: ${historicalPaidCount} cuota(s) ya pagada(s).` : 'Préstamo y cuotas creados.');
   }
 
+  function openRenewLoan(loanId) {
+    const loan=data.loans.find(l=>l.id===loanId),rows=loanInstallments(loanId);
+    if(!window.LoanRenewal.eligible(loan,rows)){showToast('Solo se renuevan préstamos entregados de una cuota con saldo pendiente.');return;}
+    const row=rows[0],snapshot=JSON.stringify([loan,rows]);
+    openModal('Renovar préstamo',`${loan.code} · ${loan.person}`,`<form id="renew-loan-form"><div class="alert">No se registra otra entrega de dinero ni se marca nada como cobrado. El saldo anterior sigue pendiente y se suma únicamente el nuevo interés acordado.</div><div class="card kv-list"><div class="kv"><span>Capital original</span><b>${money(loan.capital)}</b></div><div class="kv"><span>Vencimiento actual</span><b>${formatDate(row.dueDate)}</b></div><div class="kv"><span>Saldo anterior pendiente</span><b>${money(dueLeft(row))}</b></div></div><div class="form-grid"><label class="field">Nuevo interés acordado ($)<input name="interest" id="renew-interest" type="text" data-money-input inputmode="numeric" required placeholder="Ej. 600.000"></label><label class="field">Nuevo vencimiento<input name="dueDate" type="date" required value="${addDate(row.dueDate,0,1)}" min="${addDate(row.dueDate,1)}"></label><label class="field full-span">Observación (opcional)<textarea name="note" maxlength="1000" placeholder="Acuerdo de renovación"></textarea></label></div><div class="card kv-list"><div class="kv"><span>Total pendiente renovado</span><b id="renew-total">${money(dueLeft(row))}</b></div></div><p class="subtle">El interés se ingresa como importe fijo; no se calcula sobre los intereses anteriores. Podés registrar cada pago parcial cuando lo recibas. El vencimiento original quedará en el historial.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button type="submit" class="primary-button">Confirmar renovación</button></div></form>`);
+    const form=modalRoot.querySelector('#renew-loan-form');
+    form.elements.interest.addEventListener('input',()=>{const extra=parseMoney(form.elements.interest.value);form.querySelector('#renew-total').textContent=money(dueLeft(row)+(Number.isFinite(extra)?extra:0));});
+    const renewalId=id();
+    form.addEventListener('submit',event=>{
+      event.preventDefault();
+      const current=data.loans.find(l=>l.id===loanId),currentRows=loanInstallments(loanId);
+      if(JSON.stringify([current,currentRows])!==snapshot){showToast('El préstamo cambió. Volvé a abrir la renovación para revisar el saldo.');return;}
+      try {
+        if(!form.elements.interest.value.trim())throw Error('Ingresá el nuevo interés acordado.');
+        const result=window.LoanRenewal.renew(current,currentRows,{interest:parseMoney(form.elements.interest.value),dueDate:form.elements.dueDate.value,note:form.elements.note.value,createdAt:new Date().toISOString(),renewalId});
+        const candidate={...data,loans:data.loans.map(l=>l.id===loanId?result.loan:l),installments:data.installments.map(i=>i.id===row.id?result.installment:i)};
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));data=candidate;
+        window.DriveBackup?.changed();window.PushReminders?.changed();
+        closeModal();render();openLoanDetail(loanId);showToast('Renovación guardada. Podés registrar pagos parciales.');
+      }catch(error){showToast(error.message||'No se pudo guardar la renovación.');}
+    });
+  }
+
   function openLoanDetail(loanId) {
     const loan = data.loans.find(item => item.id === loanId);
     if (!loan) return;
@@ -1349,13 +1374,15 @@
       const stateClass = paid ? 'paid' : item.dueDate < todayKey() ? 'overdue' : item.paid > 0 ? 'partial' : 'pending';
       const undoButton = paidInApp > 0.005 || (!loan.historical && item.paid > 0.005 && !item.payments?.length)
         ? `<button class="text-button undo-installment-payment" data-action="undo-installment-payment" data-id="${escapeHtml(item.id)}">Deshacer pago</button>` : '';
-      const collectButton = !paid && loan.disbursed !== false && (item.paid <= 0.005 || loan.historical)
+      const collectButton = !paid && loan.disbursed !== false
         ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : '';
       return `<div class="installment-line ${paid ? 'installment-paid' : 'installment-pending'}"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span class="badge ${stateClass}">${paid ? 'Pagada' : item.dueDate < todayKey() ? 'Vencida' : item.paid > 0 ? 'Parcial' : 'Pendiente'}</span><span>Importe ${money(item.amount)} · Pagado ${money(item.paid)}</span>${historicalPaid > 0.005 ? `<small class="installment-origin">Pago histórico anterior a la aplicación: ${money(historicalPaid)}</small>` : ''}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${undoButton}${collectButton}</div></div>`;
     }).join('');
     const toolbar = `<div class="loan-detail-actions"><span class="badge ${loan.historical ? 'partial' : 'paid'}">${loan.historical ? 'Histórico' : 'Normal'}</span><button class="secondary-button" data-action="edit-loan" data-id="${escapeHtml(loan.id)}">Editar</button><button class="danger-button" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar</button></div>`;
+    const renewalButton=window.LoanRenewal.eligible(loan,totals.installments)?`<button class="secondary-button full" style="margin-bottom:14px" data-action="renew-loan" data-id="${escapeHtml(loan.id)}">Renovar préstamo</button>`:'';
+    const renewalHistory=Array.isArray(loan.renewals)&&loan.renewals.length?`<section class="section"><h3>Historial de renovaciones</h3><div class="list">${loan.renewals.map(r=>`<article class="card"><strong>${formatDate(r.previousDueDate)} → ${formatDate(r.newDueDate)}</strong><div class="kv-list"><div class="kv"><span>Saldo anterior sin cobrar</span><b>${money(r.previousBalance)}</b></div><div class="kv"><span>Nuevo interés acordado</span><b>${money(r.addedInterest)}</b></div><div class="kv"><span>Saldo al renovar</span><b>${money(r.newBalance)}</b></div></div>${r.note?`<p class="subtle">${escapeHtml(r.note)}</p>`:''}</article>`).join('')}</div></section>`:'';
     const duplicateWarning = repeatedNumbers.length ? `<div class="alert">Se detectaron cuotas repetidas (${repeatedNumbers.join(', ')}). No se fusionaron ni eliminaron porque pueden tener pagos vinculados. Revisá el historial antes de recalcular.</div>` : '';
-    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${history}`);
+    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${renewalButton}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical || loan.renewals?.length ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${renewalHistory}${history}`);
   }
 
   function deleteLoan(loanId) {
@@ -1543,6 +1570,7 @@
     if (!backup.data.settings || typeof backup.data.settings !== 'object') return false;
     if (!['people', 'groups', 'loanTypes', 'cards'].every(key => backup.data[key].every(value => typeof value === 'string'))) return false;
     if (!backup.data.loans.every(loan => loan && typeof loan.id === 'string' && typeof loan.person === 'string' && Number.isFinite(loan.capital))) return false;
+    if (!backup.data.loans.every(loan=>window.LoanRenewal.validHistory(loan.renewals))) return false;
     if (!backup.data.installments.every(item => item && typeof item.id === 'string' && typeof item.loanId === 'string' && Number.isFinite(item.amount) && Number.isFinite(item.paid))) return false;
     if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
@@ -1748,6 +1776,7 @@
     }
     else if (action === 'new-loan') openLoanForm();
     else if (action === 'close-modal') closeModal();
+    else if (action === 'renew-loan') openRenewLoan(button.dataset.id);
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
     else if (action === 'edit-loan') { const loan = data.loans.find(item => item.id === button.dataset.id); if (loan?.historical) openHistoricalLoanForm(button.dataset.id); else openLoanForm(button.dataset.id); }
     else if (action === 'view-loan') openLoanDetail(button.dataset.id);
