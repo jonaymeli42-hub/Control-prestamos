@@ -283,7 +283,7 @@
     return roundMoney(pendingInstallments().reduce((sum, item) => sum + dueLeft(item), 0));
   }
   function futureMoney() {
-    return roundMoney(movementBalance() + receivableTotal() - cardDebtTotal());
+    return roundMoney(movementBalance() + receivableTotal() + S.reconcile(data.movements).pending - cardDebtTotal());
   }
   function validFutureRecord(item) {
     return item && typeof item.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date || '') && Number.isFinite(Date.parse(item.savedAt)) && Number.isFinite(item.amount) && ['automatic', 'manual'].includes(item.source);
@@ -322,6 +322,7 @@
   }
 
   function futureProjection() {
+    const salaryPending=S.reconcile(data.movements).pending;
     const start = parseDate(todayKey());
     const current = movementBalance();
     const receivables = pendingInstallments();
@@ -346,9 +347,10 @@
       return {
         label: new Intl.DateTimeFormat('es-AR', { month: 'long', year: 'numeric' }).format(new Date(start.getFullYear(), start.getMonth() + index, 1)).replace(/^./, letter => letter.toLocaleUpperCase('es-AR')),
         current,
+        salaryPending,
         collected: cumulativeCollections,
         obligations,
-        available: roundMoney(current + cumulativeCollections - obligations)
+        available: roundMoney(current + salaryPending + cumulativeCollections - obligations)
       };
     });
   }
@@ -400,18 +402,19 @@
     const payable = cardDebtTotal();
     const current = movementBalance();
     const future = futureMoney();
+    const salary=S.reconcile(data.movements),salaryThisMonth=S.monthly(data.movements,todayKey().slice(0,7));
     const projection = futureProjection();
     const nextDates = [...new Set(allPending.filter(item => item.dueDate >= todayKey()).map(item => item.dueDate))].sort().slice(0, 3);
     return `${pageHeading('Buen día', 'Este es el estado de tus préstamos.', `<span class="date-pill">${formatDate(todayKey(), { day: 'numeric', month: 'short', year: 'numeric' })}</span>`)}
       <section class="summary-grid" aria-label="Resumen de dinero">
         <article class="summary-card current"><span class="label">Dinero actual</span><span class="amount">${money(current)}</span><span class="hint">Según tus movimientos</span></article>
-        <article class="summary-card future"><button type="button" class="future-visibility-toggle" data-action="toggle-future-visibility" aria-label="${futureAmountHidden?'Mostrar':'Ocultar'} dinero a futuro" aria-pressed="${futureAmountHidden}"><span class="label">Dinero a futuro</span><span class="amount">${futureAmountHidden?'$ ••••••':money(future)}</span><span class="visibility-help">${futureAmountHidden?'Mostrar importe':'Ocultar importe'}</span></button><span class="hint">Dinero actual + a cobrar − obligaciones a pagar</span><button type="button" class="history-link future-history-link" data-action="future-history">Ver historial ›</button></article>
+        <article class="summary-card future"><button type="button" class="future-visibility-toggle" data-action="toggle-future-visibility" aria-label="${futureAmountHidden?'Mostrar':'Ocultar'} dinero a futuro" aria-pressed="${futureAmountHidden}"><span class="label">Dinero a futuro</span><span class="amount">${futureAmountHidden?'$ ••••••':money(future)}</span><span class="visibility-help">${futureAmountHidden?'Mostrar importe':'Ocultar importe'}</span></button><span class="hint">${salary.pending?(futureAmountHidden?'Incluye lo pendiente de devolver del sueldo.':`Incluye ${money(salary.pending)} que debe devolver el sueldo.`):'Dinero actual + a cobrar − obligaciones a pagar'}</span><button type="button" class="history-link future-history-link" data-action="future-history">Ver historial ›</button></article>
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
       <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
-      <section class="section"><div class="card"><h3>Sueldo ↔ Préstamos</h3><p class="subtle">Ahorro neto de este mes</p><strong class="amount">${money(S.monthly(data.movements,todayKey().slice(0,7)).net)}</strong><button class="secondary-button full" style="margin-top:14px" data-page="movements" data-section="general">Ver meses y registrar pases ›</button></div></section>
-      <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual y acumula cuotas según vencimiento y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
+      <section class="section"><div class="card salary-outstanding"><h3>El sueldo debe devolver</h3><strong class="amount">${money(salary.pending)}</strong><p class="subtle">Este importe ya está incluido en Dinero a futuro. No forma parte del dinero disponible.</p><p class="subtle">Ahorro nuevo de este mes: <b>${money(salaryThisMonth.saved)}</b></p><button class="secondary-button full" style="margin-top:14px" data-page="movements" data-section="general">Ver pases ›</button></div></section>
+      <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Pendiente del sueldo</span><strong>${money(period.salaryPending)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><p class="projection-note">La proyección parte del dinero actual e incluye la devolución pendiente del sueldo, estimada para el cierre de este mes. Aún no es dinero disponible. Acumula cuotas y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></section>
       <section class="section"><div class="section-head"><h3>Próximos cobros</h3><button class="text-button" data-page="collections">Ver todos</button></div>
         ${renderUpcomingCollections(allPending, nextDates)}</section>
       `;
@@ -419,17 +422,18 @@
 
   function renderSalarySavings() {
     const summary=S.monthly(data.movements,salaryMonth);
+    const salaryState=S.reconcile(data.movements);
     const generalRows=data.movements.filter(row=>isManualMovement(row)&&movementDisplayDate(row).slice(0,7)===salaryMonth).sort((a,b)=>movementDisplayDate(a).localeCompare(movementDisplayDate(b))||(a.createdAt||'').localeCompare(b.createdAt||''));
     const visible=generalRows.filter(row=>generalFilter==='all'||(generalFilter==='salary'?S.isTransfer(row):row.type===(generalFilter==='income'?'Ingreso general':'Gasto general')));
     const generalTotal=type=>roundMoney(generalRows.filter(row=>row.type===type&&!['Pendiente','Programado'].includes(row.status)).reduce((sum,row)=>sum+row.amount,0));
     return `${pageHeading('Generales','Ingresos, pagos y pases con tu sueldo, separados de préstamos y financiaciones.','<button class="text-button" data-page="home">Volver al inicio</button>')}
       <label class="field">Mes<input id="salary-month" type="month" value="${escapeHtml(salaryMonth)}"></label>
-      <section class="card kv-list"><h3>Sueldo ↔ Préstamos</h3><div class="kv"><span>Del sueldo a Préstamos</span><b>${money(summary.received)}</b></div><div class="kv"><span>De Préstamos al sueldo</span><b>${money(summary.returned)}</b></div><div class="kv"><span>Ahorro neto del mes</span><b class="${summary.net>=0?'movement-in':'movement-out'}">${money(summary.net)}</b></div></section>
-      <p class="subtle">Se cuentan solo los pases realizados en este mes. Un resultado negativo significa que retiraste más de lo que aportaste. No incluye cobros ni intereses de préstamos.</p>
-      <div class="form-actions"><button class="primary-button" data-action="salary-in">＋ Del sueldo a Préstamos</button><button class="secondary-button" data-action="salary-out">De Préstamos a sueldo</button></div>
-      <p class="subtle">Cada pase modifica el dinero actual de Préstamos. No se registra automáticamente en Control Gastos. Si ya lo cargaste como ingreso o gasto general, editá ese movimiento y cambiá su tipo para no duplicarlo.</p>
+      <section class="card kv-list"><h3>Sueldo ↔ Préstamos</h3><div class="kv"><span>Pendiente de devolver del sueldo<small class="salary-period-note">Hasta el mes seleccionado</small></span><b>${money(summary.pending)}</b></div><div class="kv"><span>Devuelto este mes</span><b>${money(summary.repaid)}</b></div><div class="kv"><span>Ahorro nuevo del mes</span><b class="movement-in">${money(summary.saved)}</b></div></section>
+      <p class="subtle">El pendiente pasa al mes siguiente hasta que lo devuelvas. Una devolución no aumenta otra vez el dinero a futuro; el ahorro nuevo sí.</p>
+      <div class="salary-actions"><button class="secondary-button" data-action="salary-out">De Préstamos a sueldo</button><button class="secondary-button salary-return" data-action="salary-return">Devolver a Préstamos</button><button class="primary-button" data-action="salary-save">＋ Agregar ahorro nuevo</button><button class="secondary-button" data-action="salary-detail">Ver detalle</button></div>
+      <p class="subtle">Al devolver, se cubre primero lo que debe el sueldo. Si ingresás más, el excedente se registra como ahorro nuevo. Los pases anteriores «Sueldo → Préstamos» siguen esta misma regla por fecha, sin duplicarlos.</p><p class="subtle">Cada pase modifica el dinero actual de Préstamos. No se registra automáticamente en Control Gastos.</p>
       <section class="card kv-list"><div class="kv"><span>Ingresos generales realizados</span><b>${money(generalTotal('Ingreso general'))}</b></div><div class="kv"><span>Pagos generales realizados</span><b>${money(generalTotal('Gasto general'))}</b></div><button class="secondary-button full" data-action="new-movement">＋ Ingreso o pago general</button></section>
-      <section class="section"><h3>Detalle del mes</h3><div class="filter-row">${[['all','Todos'],['salary','Pases con el sueldo'],['income','Ingresos'],['expense','Pagos']].map(([value,label])=>`<button class="filter-chip ${generalFilter===value?'active':''}" data-action="general-filter" data-value="${value}">${label}</button>`).join('')}</div>${visible.length?visible.map(row=>`<button class="card full salary-transfer-row" data-action="movement-detail" data-id="${escapeHtml(row.id)}"><span><strong>${escapeHtml(row.type)}</strong><small>${formatDate(movementDisplayDate(row))} · ${escapeHtml(row.description)}${['Pendiente','Programado'].includes(row.status)?' · Programado':''}</small></span><b class="${row.direction==='in'?'movement-in':'movement-out'}">${row.direction==='in'?'+':'−'}${money(row.amount)}</b></button>`).join(''):'<p class="subtle">No hay movimientos generales para este mes y filtro.</p>'}</section>`;
+      <section class="section" id="salary-details"><h3>Detalle del mes</h3><div class="filter-row">${[['all','Todos'],['salary','Pases con el sueldo'],['income','Ingresos'],['expense','Pagos']].map(([value,label])=>`<button class="filter-chip ${generalFilter===value?'active':''}" data-action="general-filter" data-value="${value}">${label}</button>`).join('')}</div>${visible.length?visible.map(row=>`<button class="card full salary-transfer-row" data-action="movement-detail" data-id="${escapeHtml(row.id)}"><span><strong>${escapeHtml(row.type)}</strong><small>${formatDate(movementDisplayDate(row))} · ${escapeHtml(row.description)}${['Pendiente','Programado'].includes(row.status)?' · Programado':''}</small>${S.isTransfer(row)?`<small>${escapeHtml(S.allocationText(salaryState.allocations.find(a=>a.id===row.id),money))}</small>`:''}</span><b class="${row.direction==='in'?'movement-in':'movement-out'}">${row.direction==='in'?'+':'−'}${money(row.amount)}</b></button>`).join(''):'<p class="subtle">No hay movimientos generales para este mes y filtro.</p>'}</section>`;
   }
 
   function renderUpcomingCollections(installments, dates) {
@@ -1418,7 +1422,7 @@
   }
 
   function isManualMovement(item) {
-    return ['Ingreso general', 'Gasto general', S.IN, S.OUT].includes(item?.type)
+    return ['Ingreso general', 'Gasto general', S.IN, S.OUT,S.RETURN,S.SAVE].includes(item?.type)
       && !item.loanId && !item.collectionId && !item.cardFinancingId && !item.cardPaymentId;
   }
 
@@ -1428,8 +1432,25 @@
     const editing = Boolean(item);
     const date = item ? movementDisplayDate(item) : todayKey();
     const status = item ? (['Pendiente', 'Programado'].includes(item.status) ? 'Pendiente' : 'Realizado') : '';
-    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type">${['Ingreso general','Gasto general',S.IN,S.OUT].map(type=>`<option ${type===(item?.type||presetType||'Ingreso general')?'selected':''}>${escapeHtml(type)}</option>`).join('')}</select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-decimal-money-input inputmode="decimal" value="${item ? formatMovementAmount(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || '')}" required></div></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
-    openModal(editing ? 'Editar movimiento' : presetType || 'Ingreso, gasto o pase', 'Los pases entre sueldo y Préstamos suman o restan dinero y aparecen en el ahorro neto mensual.', body);
+    const body = `<form id="movement-form"><div class="form-grid"><div class="field"><label for="movement-type">Tipo</label><select id="movement-type" name="type">${['Ingreso general','Gasto general',S.IN,S.OUT,S.RETURN,S.SAVE].map(type=>`<option ${type===(item?.type||presetType||'Ingreso general')?'selected':''}>${escapeHtml(type)}</option>`).join('')}</select></div><div class="field"><label for="movement-date">Fecha</label><input id="movement-date" name="date" type="date" value="${escapeHtml(date)}" required>${editing ? '' : '<span class="field-help">Si elegís una fecha futura, quedará programado y no afectará el dinero actual.</span>'}</div><div class="field"><label for="movement-amount">Monto</label><input id="movement-amount" name="amount" type="text" data-decimal-money-input inputmode="decimal" value="${item ? formatMovementAmount(item.amount) : ''}" required></div>${editing ? `<div class="field"><label for="movement-status">Estado</label><select id="movement-status" name="status"><option value="Realizado" ${status === 'Realizado' ? 'selected' : ''}>Realizado</option><option value="Pendiente" ${status === 'Pendiente' ? 'selected' : ''}>Pendiente / Programado</option></select></div>` : ''}<div class="field full-span"><label for="movement-description">Descripción</label><input id="movement-description" name="description" maxlength="300" placeholder="Sueldo, reparación, compras…" value="${escapeHtml(item?.description || presetType || '')}" required></div></div><div id="salary-preview" class="card salary-preview" role="status" hidden></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${editing ? 'Guardar cambios' : 'Guardar movimiento'}</button></div></form>`;
+    openModal(editing ? 'Editar movimiento' : presetType || 'Ingreso, gasto o pase', 'Las devoluciones cancelan lo pendiente del sueldo. Solo el ahorro nuevo aumenta el dinero a futuro.', body);
+    const movementForm=modalRoot.querySelector('#movement-form');
+    const preview=()=>{
+      const values=new FormData(movementForm),type=String(values.get('type')),box=movementForm.querySelector('#salary-preview');
+      box.hidden=!S.isTransfer({type});if(box.hidden)return;
+      const amount=parseMovementAmount(values.get('amount')),date=String(values.get('date'));
+      const status=item?(values.get('status')==='Pendiente'?'Pendiente':'Realizado'):date>todayKey()?'Pendiente':'Realizado';
+      const candidate={...(item||{}),id:item?.id||'salary_preview',type,amount,date,status,direction:type===S.OUT?'out':'in',createdAt:item?.createdAt||new Date().toISOString()};
+      if(!S.valid(candidate)){box.textContent='Completá el importe y la fecha para ver cómo se divide.';return;}
+      const rows=item?data.movements.map(row=>row.id===item.id?candidate:row):[candidate,...data.movements];
+      const next=S.reconcile(rows),allocation=next.allocations.find(row=>row.id===candidate.id);
+      const previousCash=item&&!['Pendiente','Programado'].includes(item.status)?item.amount*(item.direction==='in'?1:-1):0;
+      const cashChange=roundMoney((status==='Pendiente'?0:amount*(type===S.OUT?-1:1))-previousCash);
+      const futureChange=roundMoney(cashChange+next.pending-S.reconcile(data.movements).pending);
+      const changeText=value=>value===0?'se mantiene':`${value>0?'aumenta':'baja'} ${money(Math.abs(value))}`;
+      box.textContent=`${status==='Pendiente'?'Quedará programado y no se contará como realizado.':type===S.OUT?'Queda pendiente de devolver del sueldo.':S.allocationText(allocation,money)+'.'} Dinero actual: ${changeText(cashChange)}. Dinero a futuro: ${changeText(futureChange)}.`;
+    };
+    movementForm.addEventListener('input',preview);movementForm.addEventListener('change',preview);preview();
     modalRoot.querySelector('#movement-form').addEventListener('submit', event => {
       event.preventDefault();
       const values = new FormData(event.currentTarget);
@@ -1437,14 +1458,15 @@
       const date = String(values.get('date'));
       const type = String(values.get('type'));
       const description = String(values.get('description')).trim();
-      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || !description || !['Ingreso general', 'Gasto general',S.IN,S.OUT].includes(type)) { showToast('Revisá el monto y la fecha.'); return; }
+      if (!Number.isFinite(amount) || amount <= 0 || !parseDate(date) || !description || !['Ingreso general', 'Gasto general',S.IN,S.OUT,S.RETURN,S.SAVE].includes(type)) { showToast('Revisá el monto y la fecha.'); return; }
+      if(S.isTransfer({type})&&!S.valid({type,date,amount,direction:type===S.OUT?'out':'in'})){showToast('Revisá el importe en pesos y la fecha.');return;}
       if (item) {
         const nextStatus = values.get('status') === 'Pendiente' ? 'Pendiente' : 'Realizado';
-        Object.assign(item, { type, date, scheduledDate: nextStatus === 'Pendiente' ? date : '', description, direction: ['Ingreso general',S.IN].includes(type) ? 'in' : 'out', amount, status: nextStatus });
+        Object.assign(item, { type, date, scheduledDate: nextStatus === 'Pendiente' ? date : '', description, direction: ['Ingreso general',S.IN,S.RETURN,S.SAVE].includes(type) ? 'in' : 'out', amount, status: nextStatus });
         persist(); closeModal(); render(); showToast('Movimiento actualizado.'); return;
       }
       const future = date > todayKey();
-      data.movements.unshift({ id: id(), type, date, scheduledDate: future ? date : '', createdAt: new Date().toISOString(), person: '', description, direction: ['Ingreso general',S.IN].includes(type) ? 'in' : 'out', amount, status: future ? 'Pendiente' : 'Realizado' });
+      data.movements.unshift({ id: id(), type, date, scheduledDate: future ? date : '', createdAt: new Date().toISOString(), person: '', description, direction: ['Ingreso general',S.IN,S.RETURN,S.SAVE].includes(type) ? 'in' : 'out', amount, status: future ? 'Pendiente' : 'Realizado' });
       persist(); closeModal(); render(); showToast(future ? 'Movimiento programado; todavía no afecta el dinero actual.' : 'Movimiento realizado y guardado.');
     });
   }
@@ -1462,7 +1484,7 @@
     const financingId = item.cardFinancingId || financingPayment?.financingId;
     const relatedFinancing = financingId && data.cardFinancings.find(row=>row.id===financingId);
     const manualActions = isManualMovement(item) ? `<div class="form-actions" style="margin-top:14px"><button class="secondary-button" data-action="edit-movement" data-id="${escapeHtml(item.id)}">Editar</button><button class="danger-button" data-action="delete-movement" data-id="${escapeHtml(item.id)}">Eliminar</button></div>` : '';
-    openModal(displayMovementType(item), formatDate(eventDate, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || item.person || '—')}</b></div><div class="kv"><span>Tipo</span><b>${S.isTransfer(item)?'Pase con el sueldo':item.direction === 'in' ? 'Ingreso' : 'Gasto'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${installment ? `<div class="kv"><span>Cuota</span><b>${installment.number} · ${money(installment.paid)} de ${money(installment.amount)} pagados</b></div>` : ''}${eventDate ? `<div class="kv"><span>Fecha prevista</span><b>${formatDate(eventDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${relatedLoan ? `<button class="secondary-button full" style="margin-top:14px" data-action="view-loan" data-id="${escapeHtml(relatedLoan.id)}">Ver préstamo ${escapeHtml(relatedLoan.code)}</button>` : ''}${relatedFinancing ? `<button class="secondary-button full" style="margin-top:14px" data-action="financing-detail" data-id="${escapeHtml(relatedFinancing.id)}">Ver financiación · ${escapeHtml(relatedFinancing.card)}</button>` : ''}${canRealize ? `<button class="primary-button full" style="margin-top:14px" data-action="realize-movement" data-id="${escapeHtml(item.id)}">${actionLabel}</button>` : ''}${financingPayment ? `<button class="danger-button full" style="margin-top:14px" data-action="delete-card-payment" data-id="${escapeHtml(financingPayment.id)}">Deshacer pago</button>` : ''}${manualActions}`);
+    openModal(displayMovementType(item), formatDate(eventDate, { day: 'numeric', month: 'long', year: 'numeric' }), `<div class="card kv-list"><div class="kv"><span>Descripción</span><b>${escapeHtml(item.description || item.person || '—')}</b></div><div class="kv"><span>Tipo</span><b>${S.isTransfer(item)?'Pase con el sueldo':item.direction === 'in' ? 'Ingreso' : 'Gasto'}</b></div><div class="kv"><span>Monto</span><b>${money(item.amount)}</b></div>${S.isTransfer(item)?`<div class="kv"><span>${item.direction==='in'?'Distribución del ingreso':'Efecto del pase'}</span><b>${escapeHtml(S.allocationText(S.reconcile(data.movements).allocations.find(row=>row.id===item.id),money)||(['Pendiente','Programado'].includes(item.status)?'Aún no realizado':'Pendiente de devolver del sueldo'))}</b></div>`:''}${installment ? `<div class="kv"><span>Cuota</span><b>${installment.number} · ${money(installment.paid)} de ${money(installment.amount)} pagados</b></div>` : ''}${eventDate ? `<div class="kv"><span>Fecha prevista</span><b>${formatDate(eventDate)}</b></div>` : ''}${item.status ? `<div class="kv"><span>Estado</span><b>${escapeHtml(item.status)}</b></div>` : ''}</div>${relatedLoan ? `<button class="secondary-button full" style="margin-top:14px" data-action="view-loan" data-id="${escapeHtml(relatedLoan.id)}">Ver préstamo ${escapeHtml(relatedLoan.code)}</button>` : ''}${relatedFinancing ? `<button class="secondary-button full" style="margin-top:14px" data-action="financing-detail" data-id="${escapeHtml(relatedFinancing.id)}">Ver financiación · ${escapeHtml(relatedFinancing.card)}</button>` : ''}${canRealize ? `<button class="primary-button full" style="margin-top:14px" data-action="realize-movement" data-id="${escapeHtml(item.id)}">${actionLabel}</button>` : ''}${financingPayment ? `<button class="danger-button full" style="margin-top:14px" data-action="delete-card-payment" data-id="${escapeHtml(financingPayment.id)}">Deshacer pago</button>` : ''}${manualActions}`);
   }
 
   function deleteManualMovement(movementId) {
@@ -1744,7 +1766,8 @@
     } else if (action === 'calendar-event-detail') openCalendarEvent(button.dataset.kind, button.dataset.id);
     else if (action === 'calendar-collect') openPayForm(button.dataset.id);
     else if (action === 'calendar-pay-card') openCardPaymentForm(button.dataset.id);
-    else if (action === 'salary-in' || action === 'salary-out') openMovementForm('',action==='salary-in'?S.IN:S.OUT);
+    else if(action==='salary-detail') document.getElementById('salary-details')?.scrollIntoView({behavior:'smooth',block:'start'});
+    else if(['salary-in','salary-out','salary-return','salary-save'].includes(action)) openMovementForm('',({'salary-in':S.IN,'salary-out':S.OUT,'salary-return':S.RETURN,'salary-save':S.SAVE})[action]);
     else if (action === 'new-movement' || action === 'new-income') openMovementForm();
     else if(action==='financing-month'){financingMonth=button.dataset.month;render();}
     else if (action === 'new-financing') openFinancingForm();
