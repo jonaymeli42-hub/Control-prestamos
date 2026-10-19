@@ -6,6 +6,7 @@
   let salaryMonth = todayKey().slice(0,7);
   let generalFilter='all';
   let movementSection='loans';
+  let financingMonth=todayKey().slice(0,7);
   let futureAmountHidden=false;try{futureAmountHidden=localStorage.getItem('control-prestamos-future-hidden')==='true';}catch(_){}
   const STORAGE_KEY = 'control-prestamos-data';
   const THEME_STORAGE_KEY = 'control-prestamos-appearance';
@@ -649,7 +650,28 @@
       ${items.length ? `<div class="list">${items.map(item => `<article class="card movement-card" data-action="movement-detail" data-id="${escapeHtml(item.id)}"><div class="row-top"><div><div class="person">${escapeHtml(displayMovementType(item))}</div><div class="subtle">${formatDate(movementDisplayDate(item), { day: 'numeric', month: 'short', year: 'numeric' })}${item.person ? ` · ${escapeHtml(item.person)}` : ''}</div></div><div class="amount ${item.direction === 'in' ? 'movement-in' : 'movement-out'}">${item.direction === 'in' ? '+' : '−'}${money(item.amount)}</div></div><div class="inline-details"><span>${directionLabel(item.direction)}</span>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${item.status === 'Pendiente' ? '<span class="badge pending">Programado</span>' : ''}</div></article>`).join('')}</div>` : emptyState('↔', 'Sin movimientos en esta categoría', 'Los movimientos de préstamos y los ingresos o gastos registrados aparecerán acá.', '<button class="primary-button" data-action="new-movement">Registrar movimiento</button>')}`;
   }
 
+  function renderFinancingMonths(records) {
+    const overview=window.FinancingOverview.build(records,todayKey(),F);
+    const current=todayKey().slice(0,7),now=parseDate(todayKey());
+    const next=dateKey(new Date(now.getFullYear(),now.getMonth()+1,1)).slice(0,7);
+    const monthName=month=>formatDate(month+'-01',{month:'long'});
+    const monthLabel=month=>formatDate(month+'-01',{month:'long',year:'numeric'});
+    const group=overview.months.find(item=>item.month===financingMonth)||{items:[],total:0};
+    const older=overview.rows.filter(row=>row.date&&row.date.slice(0,7)<financingMonth);
+    const sum=rows=>roundMoney(rows.reduce((n,row)=>n+row.amount,0));
+    const renderRows=rows=>rows.map(row=>`<button type="button" class="card financing-month-row" data-action="financing-detail" data-id="${escapeHtml(row.financingId)}"><span class="financing-month-concept"><strong>${escapeHtml(row.label)}</strong><small>${row.number?`Cuota ${row.number} de ${row.count} · `:'Saldo pendiente · '}${row.date?`Vence ${formatDate(row.date,{day:'numeric',month:'short'})}`:'Sin fecha de pago'}${row.paid>0?' · Pago parcial':''}</small>${row.date&&row.date<todayKey()?'<small class="movement-out">Vencimiento pasado</small>':''}</span><span class="financing-month-amount"><b>${money(row.amount)}</b><small>Ver detalle ›</small></span></button>`).join('');
+    return `<section class="financing-by-month" aria-label="Pagos pendientes por mes"><div class="financing-month-tabs">${[[current,'Este mes'],[next,'Próximo mes']].map(([month,label])=>`<button type="button" data-action="financing-month" data-month="${month}" aria-pressed="${financingMonth===month}" class="${financingMonth===month?'active':''}"><strong>${label}</strong><span>${monthName(month)}</span></button>`).join('')}</div>
+      <details class="financing-other-month"><summary>Consultar otro mes</summary><label class="field">Mes<input type="month" id="financing-month" value="${escapeHtml(financingMonth)}"></label></details>
+      <article class="card financing-month-summary"><span>Te queda pagar en ${monthLabel(financingMonth)}</span><strong>${money(group.total)}</strong></article>
+      <div class="list financing-month-list">${group.items.length?renderRows(group.items):'<p class="subtle">No quedan pagos con vencimiento en este mes.</p>'}</div>
+      ${older.length?`<details class="card financing-month-extra"><summary>Meses anteriores pendientes · ${money(sum(older))}</summary><p class="subtle">No están incluidos en el total del mes seleccionado.</p><div class="list">${renderRows(older)}</div></details>`:''}
+      ${overview.undated.length?`<details class="card financing-month-extra"><summary>Sin fecha de pago · ${money(sum(overview.undated))}</summary><p class="subtle">Definí una fecha en el detalle de cada financiación para ubicarla en un mes.</p><div class="list">${renderRows(overview.undated)}</div></details>`:''}
+      <p class="subtle financing-month-note">Los importes muestran lo que falta pagar de cada mes, según sus vencimientos registrados.</p>
+    </section>`;
+  }
+
   function renderCards() {
+    data.cardFinancings.forEach(syncFinancingPaid);
     const received = data.cardFinancings.filter(item => item.received !== false);
     const totals = {
       received: received.reduce((sum, item) => sum + Number(item.receivedAmount || 0), 0),
@@ -659,9 +681,11 @@
     };
     const records = [...data.cardFinancings].sort((a, b) => (b.receivedDate || '').localeCompare(a.receivedDate || ''));
     return `${pageHeading('Financiación', `${records.length} financiaciones`, '<button class="primary-button" data-action="new-financing">＋ Nueva</button>')}
+      ${renderFinancingMonths(records)}
+      <details class="card financing-all-totals"><summary><span><strong>Totales generales</strong><small>Ver recibido, pagado y deuda total</small></span></summary>
       <section class="summary-grid card-summary-grid"><article class="summary-card current"><span class="label">Total recibido</span><span class="amount">${money(totals.received)}</span></article><article class="summary-card future"><span class="label">Total a devolver</span><span class="amount">${money(totals.repay)}</span></article><article class="summary-card receivable"><span class="label">Total pagado</span><span class="amount">${money(totals.paid)}</span></article><article class="summary-card payable"><span class="label">Total pendiente</span><span class="amount">${money(totals.balance)}</span></article></section>
       <section class="section"><div class="section-head"><h3>Tarjetas disponibles</h3></div><div class="list">${data.cards.map(card => { const associated = data.cardFinancings.filter(item => !F.isMonthly(item) && normalizedName(item.card) === normalizedName(card)); const balance = associated.reduce((sum, item) => sum + financingBalance(item), 0); const upcoming = associated.filter(item => item.nextPaymentDate && financingBalance(item) > 0).sort((a, b) => a.nextPaymentDate.localeCompare(b.nextPaymentDate))[0]; return `<button class="card configured-card" data-action="card-detail" data-card="${escapeHtml(card)}"><span><b>${escapeHtml(card)}</b><small>${associated.length} financiaciones · Pendiente ${money(balance)}</small></span><span>${upcoming ? `Próximo ${formatDate(upcoming.nextPaymentDate)}` : 'Ver detalle'} ›</span></button>`; }).join('') || '<p class="subtle">No hay tarjetas configuradas.</p>'}</div>${renderSettingGroup('Tarjetas', 'cards', data.cards)}</section>
-      <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones', 'Registrá dinero recibido de una tarjeta o de una persona y sus pagos.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section>`;
+      <section class="section"><div class="section-head"><h3>Financiaciones</h3></div>${records.length ? `<div class="list">${records.map(renderFinancingCard).join('')}</div>` : emptyState('▭', 'Sin financiaciones', 'Registrá dinero recibido de una tarjeta o de una persona y sus pagos.', '<button class="primary-button" data-action="new-financing">Registrar financiación</button>')}</section></details>`;
   }
 
   function openConfiguredCardDetail(card) {
@@ -906,7 +930,7 @@
     financing.paid = roundMoney(financing.paid + amount);
     financing.payments ||= [];
     financing.payments.push(payment.id);
-    financing.nextPaymentDate = '';
+    // Preserve the due date so partial payments and undo remain in their original month.
     data.cardPayments.unshift(payment);
     data.movements.unshift({ id: id(), date, createdAt: payment.createdAt, type: 'Tarjeta pagada', description: `${financing.card} · Pago de financiación`, direction: 'out', amount, cardFinancingId: financing.id, cardPaymentId: payment.id, status: 'Realizado' });
     syncFinancingPaid(financing); persist(); closeModal(); render(); showToast('Pago registrado; se actualizó el saldo pendiente.');
@@ -1722,6 +1746,7 @@
     else if (action === 'calendar-pay-card') openCardPaymentForm(button.dataset.id);
     else if (action === 'salary-in' || action === 'salary-out') openMovementForm('',action==='salary-in'?S.IN:S.OUT);
     else if (action === 'new-movement' || action === 'new-income') openMovementForm();
+    else if(action==='financing-month'){financingMonth=button.dataset.month;render();}
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
     else if (action === 'edit-financing') openFinancingForm(button.dataset.id);
@@ -1760,6 +1785,7 @@
     event.preventDefault(); changeSetting(form);
   });
   document.addEventListener('change', event => {
+    if(event.target.id==='financing-month' && /^\d{4}-\d{2}$/.test(event.target.value)){financingMonth=event.target.value;render();return;}
     if(event.target.id==='movement-section'){movementSection=event.target.value;movementFilter='Todos';render();return;}
     if(event.target.id==='salary-month' && /^\d{4}-\d{2}$/.test(event.target.value)){salaryMonth=event.target.value;render();return;}
     if (event.target.id === 'backup-file') importBackup(event.target.files?.[0]);
