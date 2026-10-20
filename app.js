@@ -481,12 +481,15 @@
   }
 
   function calendarEvents() {
-    const events = [];
+    const financingCalendar=window.FinancingCalendar.build(data.cardFinancings,data.cardPayments,F);
+    const events = [...financingCalendar.events];
     pendingInstallments().forEach(item => {
       const loan = data.loans.find(record => record.id === item.loanId);
       if (loan) events.push({ id: item.id, kind: 'installment', date: item.dueDate, amount: dueLeft(item), label: `Cobro de cuota ${item.number}`, detail: `${loan.person} · ${loan.code}` });
     });
     data.movements.forEach(item => {
+      const payment=item.cardPaymentId&&data.cardPayments.find(p=>p.id===item.cardPaymentId);
+      if(payment&&financingCalendar.coveredFinancingIds.has(payment.financingId))return;
       const date = movementDisplayDate(item);
       if (!date) return;
       if (item.collectionId) {
@@ -501,9 +504,6 @@
           : item.cardFinancingId || item.cardPaymentId ? 'card-transaction'
             : item.direction === 'in' ? 'income' : 'expense';
       events.push({ id: item.id, kind, date, amount: item.amount, status: item.status || (kind === 'collection' ? 'Cobrado' : ''), label: displayMovementType(item), detail: item.person || item.description || (item.direction === 'in' ? 'Ingreso general' : 'Gasto general') });
-    });
-    data.cardFinancings.filter(item => item.received !== false && financingBalance(item) > 0.005 && item.nextPaymentDate).forEach(item => {
-      financingDues(item).forEach(row => events.push({ id: F.isMonthly(item) ? `${item.id}::${row.number}` : item.id, kind: 'card-payment', date: row.date, amount: row.amount, label: F.isMonthly(item) ? `Pago de financiación · mes ${row.number}` : 'Pago de tarjeta', detail: `${item.card} · ${F.isInstallments(item) ? 'cuotas normales' : F.isMonthly(item) ? 'interés mensual + capital final' : 'saldo pendiente'}` }));
     });
     const unique = new Map();
     events.filter(event => parseDate(event.date)).forEach(event => unique.set(`${event.kind}:${event.id}:${event.date}`, event));
@@ -582,8 +582,9 @@
     const receivedFinancing = event.label === 'Financiación recibida';
     const titleClass = receivedFinancing ? 'calendar-financing-title' : event.label === 'Préstamo dado' ? 'calendar-delivery-title' : '';
     const completedCard = !receivedFinancing && ['card-payment', 'card-transaction'].includes(event.kind) && ['Realizado', 'Pagado', 'Pagada'].includes(state);
+    const paymentDetail=event.kind==='card-payment'?`<div class="kv"><span>Importe del vencimiento</span><b>${money(event.originalAmount)}</b></div><div class="kv"><span>Pagado</span><b>${money(event.paidAmount)}</b></div><div class="kv"><span>Pendiente</span><b>${money(event.remaining)}</b></div>${(event.paymentDetails||[]).map(p=>`<div class="kv"><span>Fecha real del pago: ${formatDate(p.date)}</span><b>${money(p.amount)}</b></div>`).join('')}${event.legacyPaid>0?`<p class="subtle">${money(event.legacyPaid)} pagados antes del historial detallado, sin fecha registrada.</p>`:''}`:'';
     const colorKind = ['card-payment', 'card-transaction'].includes(event.kind) ? 'card' : ['income', 'expense', 'movement'].includes(event.kind) ? 'movement' : 'loan';
-    return `<article class="card calendar-event-card event-${colorKind} ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" aria-expanded="${expanded}"><span><strong class="${titleClass}">${escapeHtml(event.label)}</strong><small>${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })} · ${label}</small></span><span class="calendar-event-summary"><b>${money(event.amount)}</b><i class="badge ${receivedFinancing && state === 'Realizado' ? 'financing-received' : completedCard ? 'paid' : ''}">${escapeHtml(state)}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Nombre / identificador</span><b>${escapeHtml(event.detail)}</b></div><div class="kv"><span>Tipo</span><b>${label}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(event.date, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe</span><b>${money(event.amount)}</b></div><div class="kv"><span>Estado</span><b>${escapeHtml(state)}</b></div></div><button class="secondary-button full" data-action="calendar-event-detail" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}">Ver detalle completo ›</button></div>` : ''}</article>`;
+    return `<article class="card calendar-event-card event-${colorKind} ${expanded ? 'expanded' : ''}"><button class="calendar-event-toggle" data-action="calendar-event" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}" aria-expanded="${expanded}"><span><strong class="${titleClass}">${escapeHtml(event.label)}</strong><small>${escapeHtml(event.detail)} · ${formatDate(event.date, { day: 'numeric', month: 'short' })} · ${label}</small></span><span class="calendar-event-summary"><b>${money(event.amount)}</b><i class="badge ${receivedFinancing && state === 'Realizado' ? 'financing-received' : completedCard ? 'paid' : state==='Parcial' ? 'partial' : ''}">${escapeHtml(state)}</i></span></button>${expanded ? `<div class="calendar-event-expanded"><div class="kv-list"><div class="kv"><span>Nombre / identificador</span><b>${escapeHtml(event.detail)}</b></div><div class="kv"><span>Tipo</span><b>${label}</b></div><div class="kv"><span>Fecha</span><b>${formatDate(event.date, { day: 'numeric', month: 'long', year: 'numeric' })}</b></div><div class="kv"><span>Importe</span><b>${money(event.amount)}</b></div><div class="kv"><span>Estado</span><b>${escapeHtml(state)}</b></div>${paymentDetail}</div><button class="secondary-button full" data-action="calendar-event-detail" data-kind="${event.kind}" data-id="${escapeHtml(event.id)}">Ver detalle completo ›</button></div>` : ''}</article>`;
   }
 
   function openCalendarEvent(kind, eventId) {
@@ -597,8 +598,7 @@
       const [financingId] = eventId.split('::');
       const financing = data.cardFinancings.find(record => record.id === financingId);
       if (!financing) return;
-      if (F.isMonthly(financing)) { openFinancingDetail(financing.id); return; }
-      openModal('Pago de tarjeta', financing.card, `<div class="card kv-list"><div class="kv"><span>Fecha prevista</span><b>${formatDate(financing.nextPaymentDate)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><button class="primary-button full" style="margin-top:14px" data-action="calendar-pay-card" data-id="${escapeHtml(financing.id)}">Marcar pagado</button>`);
+      openFinancingDetail(financing.id);
     }
   }
 
