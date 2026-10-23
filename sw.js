@@ -1,5 +1,5 @@
-const CACHE_NAME = 'control-prestamos-shell-v32';
-const SHELL_FILES = ['./index.html', './styles.css', './app.js', './financing-calendar.js?v=1', './loan-renewal.js?v=1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
+const CACHE_NAME = 'control-prestamos-shell-v33';
+const SHELL_FILES = ['./index.html', './styles.css', './app.js', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
@@ -40,3 +40,4 @@ self.addEventListener('push', event => {
     await self.registration.showNotification(String(message.title||'🔔 Cobros').slice(0,100),{body:message.body.slice(0,1000),tag:String(message.tag||'cobros').slice(0,100),renotify:false,icon:new URL('icon-192.png',self.registration.scope).href,badge:new URL('icon-192.png',self.registration.scope).href,data:{url:target.href}});
   })());
 });
+

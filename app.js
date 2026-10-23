@@ -3,6 +3,8 @@
 
   const F = window.ReceivedFinancing;
   const S = window.SalarySavings;
+  const LC = window.LoanCancellation;
+  const cancelledMovement = item => LC.context(data).isCancelled(item);
   let salaryMonth = todayKey().slice(0,7);
   let generalFilter='all';
   let movementSection='loans';
@@ -217,7 +219,7 @@
     const total = installments.reduce((sum, item) => sum + item.amount, 0);
     const paid = installments.reduce((sum, item) => sum + item.paid, 0);
     const balance = Math.max(0, total - paid);
-    const status = balance <= 0.005 ? 'Pagado' : paid > 0 ? 'Parcial' : 'Pendiente';
+    const status = loan.cancelled === true ? 'Anulado' : balance <= 0.005 ? 'Pagado' : paid > 0 ? 'Parcial' : 'Pendiente';
     return { installments, total, paid, balance, status, progress: total ? Math.min(100, paid / total * 100) : 0 };
   }
 
@@ -225,11 +227,11 @@
   function pendingInstallments() {
     return data.installments.filter(item => {
       const loan = data.loans.find(record => record.id === item.loanId);
-      return dueLeft(item) > 0.005 && (!loan || loan.disbursed !== false);
+      return dueLeft(item) > 0.005 && (!loan || (loan.disbursed !== false && loan.cancelled !== true));
     });
   }
   function movementBalance() {
-    return roundMoney(data.movements.reduce((total, item) => {
+    return roundMoney(LC.activeData(data).movements.reduce((total, item) => {
       if (item.status === 'Pendiente' || item.status === 'Programado') return total;
       return total + (item.direction === 'in' ? item.amount : -item.amount);
     }, Number(data.settings.initialBalance) || 0));
@@ -368,6 +370,7 @@
     return 'cards';
   }
   function displayMovementType(item) {
+    if(cancelledMovement(item))return `${item.type} · Anulado (fuera del saldo)`;
     const financing = item.cardFinancingId && data.cardFinancings.find(f => f.id === item.cardFinancingId);
     if (F.isMonthly(financing)) return item.cardPaymentId ? 'Financiación pagada' : 'Financiación recibida';
     return item.type === 'Préstamo entregado' ? 'Préstamo dado' : item.type;
@@ -378,7 +381,7 @@
 
   function badge(status, dueDate) {
     const overdue = status !== 'Pagado' && dueDate && dueDate < todayKey();
-    const className = status === 'Pagado' ? 'paid' : overdue ? 'overdue' : status === 'Parcial' ? 'partial' : 'pending';
+    const className = status === 'Anulado' ? 'cancelled' : status === 'Pagado' ? 'paid' : overdue ? 'overdue' : status === 'Parcial' ? 'partial' : 'pending';
     return `<span class="badge ${className}">${overdue ? 'Vencida' : escapeHtml(status)}</span>`;
   }
 
@@ -412,7 +415,7 @@
         <article class="summary-card receivable"><span class="label">A recibir</span><span class="amount">${money(receivable)}</span><span class="hint">Saldo de cuotas pendientes</span></article>
         <article class="summary-card payable"><span class="label">A pagar de financiaciones</span><span class="amount">${money(payable)}</span><span class="hint">Saldo pendiente de financiación</span></article>
       </section>
-      <div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
+      ${data.loans.some(l=>l.cancelled===true)?`<div class="alert loan-cancelled-notice">${data.loans.filter(l=>l.cancelled===true).length} préstamo(s) anulado(s): sus entregas, cobros y cuotas no se incluyen en estos importes. <button type="button" class="text-button" data-action="view-cancelled-loans">Ver anulados</button></div>`:''}<div class="home-add-actions"><button type="button" class="primary-button home-add-loan" data-action="new-loan" aria-label="Agregar préstamo"><span aria-hidden="true">＋</span> Préstamo</button><button type="button" class="secondary-button home-add-financing" data-action="new-financing" aria-label="Agregar financiación"><span aria-hidden="true">＋</span> Financiación</button><button type="button" class="secondary-button home-add-income" data-action="new-income" aria-label="Agregar ingreso"><span aria-hidden="true">＋</span> Ingreso</button></div>
       <section class="section home-salary"><div class="card salary-outstanding"><div class="home-salary-heading"><h3>El sueldo debe devolver</h3><strong class="amount">${money(salary.pending)}</strong></div><p class="subtle">Ya incluido en Dinero a futuro; no disponible aún.</p><div class="home-salary-footer"><span>Ahorro nuevo del mes: <b>${money(salaryThisMonth.saved)}</b></span><button class="text-button" data-page="movements" data-section="general">Ver pases ›</button></div></div></section>
       <section class="section projection-section"><div class="section-head"><div><h3>Proyección mensual acumulada</h3><p class="subtle">Dinero disponible estimado al cierre de cada mes.</p></div><button class="text-button" data-action="toggle-projection">${projectionExpanded ? 'Mostrar menos' : 'Mostrar más'}</button></div><div class="projection-list">${projection.slice(0, projectionExpanded ? projection.length : 1).map(period => `<article class="projection-card"><h4>${escapeHtml(period.label)}</h4><div class="projection-values"><div><span>Dinero actual</span><strong>${money(period.current)}</strong></div><div><span>+ Pendiente del sueldo</span><strong>${money(period.salaryPending)}</strong></div><div><span>+ Cobros acumulados</span><strong>${money(period.collected)}</strong></div><div><span>− Obligaciones acumuladas</span><strong>${money(period.obligations)}</strong></div></div><div class="projection-total"><span>Disponible al llegar a ${escapeHtml(period.label)}</span><strong>${money(period.available)}</strong></div></article>`).join('')}</div><details class="projection-help"><summary>Cómo se calcula</summary><p class="projection-note">La proyección parte del dinero actual e incluye la devolución pendiente del sueldo, estimada para el cierre de este mes. Aún no es dinero disponible. Acumula cuotas y financiaciones según sus vencimientos. Los cobros u obligaciones sin fecha definida se incluyen en el último mes proyectado.</p></details></section>
       `;
@@ -448,9 +451,9 @@
 
   function renderLoanCard(loan) {
     const totals = loanTotals(loan);
-    const next = totals.installments.find(item => dueLeft(item) > 0);
-    return `<article class="card loan-card" data-action="loan-detail" data-id="${escapeHtml(loan.id)}" tabindex="0" role="button" aria-label="Ver préstamo ${escapeHtml(loan.code)} de ${escapeHtml(loan.person)}">
-      <div class="row-top"><div><div class="person">${escapeHtml(loan.person)} <span class="subtle">· ${escapeHtml(loan.code)}</span></div><div class="subtle">${escapeHtml(loan.mode)}</div></div>${badge(totals.status)}</div>
+    const next = !loan.cancelled && totals.installments.find(item => dueLeft(item) > 0);
+    return `<article class="card loan-card ${loan.cancelled?'loan-is-cancelled':''}" data-action="loan-detail" data-id="${escapeHtml(loan.id)}" tabindex="0" role="button" aria-label="Ver préstamo ${escapeHtml(loan.code)} de ${escapeHtml(loan.person)}">
+      <div class="row-top"><div><div class="person">${escapeHtml(loan.person)} <span class="subtle">· ${escapeHtml(loan.code)}</span></div><div class="subtle">${escapeHtml(loan.mode)}</div></div>${badge(totals.status)}</div>${loan.cancelled?'<p class="subtle">Registro conservado · excluido del saldo y del dinero a futuro.</p>':''}
       <div class="inline-details"><span>Capital <b>${money(loan.capital)}</b></span><span>Total <b>${money(totals.total)}</b></span><span>Saldo <b>${money(totals.balance)}</b></span><span>Cobrado <b>${money(totals.paid)}</b></span></div>${next ? `<div class="subtle loan-next">Próxima cuota: ${next.number} de ${loan.count || totals.installments.length} · ${formatDate(next.dueDate)} · ${money(dueLeft(next))}</div>` : ''}
       <div class="progress"><span style="width:${totals.progress}%"></span></div><div class="progress-meta"><span>Cobrado ${money(totals.paid)}</span><span>${Math.round(totals.progress)}%</span></div></article>`;
   }
@@ -466,7 +469,7 @@
   function renderLoans() {
     const loans = data.loans.filter(loan => loanFilter === 'Todos' || loanTotals(loan).status === loanFilter);
     return `${pageHeading('Préstamos', `${data.loans.length} en total`, '')}
-      <div class="filter-row">${['Todos', 'Pendiente', 'Parcial', 'Pagado'].map(filter => `<button class="filter-chip ${loanFilter === filter ? 'active' : ''}" data-action="loan-filter" data-value="${filter}">${filter}</button>`).join('')}</div>
+      <div class="filter-row">${['Todos', 'Pendiente', 'Parcial', 'Pagado', 'Anulado'].map(filter => `<button class="filter-chip ${loanFilter === filter ? 'active' : ''}" data-action="loan-filter" data-value="${filter}">${filter}</button>`).join('')}</div>
       ${loans.length ? `<div class="list">${loans.map(renderLoanCard).join('')}</div>` : emptyState('▤', 'No hay préstamos', 'Usá el botón + superior para crear un préstamo.')}`;
   }
 
@@ -487,7 +490,9 @@
       const loan = data.loans.find(record => record.id === item.loanId);
       if (loan) events.push({ id: item.id, kind: 'installment', date: item.dueDate, amount: dueLeft(item), label: `Cobro de cuota ${item.number}`, detail: `${loan.person} · ${loan.code}` });
     });
+    const movementContext=LC.context(data);
     data.movements.forEach(item => {
+      if(movementContext.isCancelled(item))return;
       const payment=item.cardPaymentId&&data.cardPayments.find(p=>p.id===item.cardPaymentId);
       if(payment&&financingCalendar.coveredFinancingIds.has(payment.financingId))return;
       const date = movementDisplayDate(item);
@@ -514,7 +519,7 @@
     return data.installments.filter(item => {
       if (item.dueDate !== date) return false;
       const loan = data.loans.find(record => record.id === item.loanId);
-      return Boolean(loan && loan.disbursed !== false);
+      return Boolean(loan && loan.disbursed !== false && !loan.cancelled);
     }).sort((a, b) => a.number - b.number);
   }
 
@@ -610,7 +615,7 @@
     const days = new Date(year, month + 1, 0).getDate();
     const slots = Math.ceil((offset + days) / 7) * 7;
     const events = calendarEvents();
-    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false)).map(item => ({ id: item.id, kind: 'installment', number: item.number, date: item.dueDate, amount: dueLeft(item) > 0.005 ? dueLeft(item) : item.amount, label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
+    const allLoanInstallments = data.installments.filter(item => data.loans.some(loan => loan.id === item.loanId && loan.disbursed !== false && !loan.cancelled)).map(item => ({ id: item.id, kind: 'installment', number: item.number, date: item.dueDate, amount: dueLeft(item) > 0.005 ? dueLeft(item) : item.amount, label: `Cuota ${item.number}`, detail: `${data.loans.find(loan => loan.id === item.loanId)?.code || 'Préstamo'} · ${data.loans.find(loan => loan.id === item.loanId)?.person || ''}` }));
     const calendarItems = [...events.filter(event => event.kind !== 'installment'), ...allLoanInstallments].sort((a, b) => a.date.localeCompare(b.date) || (a.kind === 'installment' ? 0 : 1) - (b.kind === 'installment' ? 0 : 1) || (a.number || 0) - (b.number || 0) || a.label.localeCompare(b.label));
     const eventsByDate = new Map();
     calendarItems.forEach(event => {
@@ -644,7 +649,7 @@
     return selector+(movementSection==='summary'?renderMonthlySummary():movementSection==='general'?renderSalarySavings():renderFinancialMovements());
   }
   function renderMonthlySummary() {
-    const report=window.MonthlySummary.build(data,summaryMonth,window.FinancingOverview,F);
+    const report=window.MonthlySummary.build(LC.activeData(data),summaryMonth,window.FinancingOverview,F);
     const current=todayKey().slice(0,7),next=addDate(current+'-01',0,1).slice(0,7);
     const amount=n=>money(n);
     const cards=[['collections','Cobros de préstamos','Cobrado','Pendiente de cobro'],['financing','Pagos de financiación','Pagado','Pendiente de pago'],['lent','Nuevos préstamos','Entregado','Programado']];
@@ -1018,6 +1023,7 @@
   function openLoanForm(loanId = '') {
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
+    if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
     const deliveryDate = existing?.deliveryDate || todayKey();
     const firstDue = existing?.firstDue || addDate(deliveryDate, 0, 1);
@@ -1101,6 +1107,7 @@
   function openHistoricalLoanForm(loanId = '') {
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
+    if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
     const existingRows = existing ? loanInstallments(existing.id).sort((a, b) => a.number - b.number).map(item => ({ dueDate: item.dueDate, amount: formatIntegerInput(item.amount), state: Number(item.paid) >= Number(item.amount) ? 'paid' : Number(item.paid) > 0 ? 'partial' : 'pending', paid: formatIntegerInput(item.paid) })) : [];
     const body = `<form id="historical-loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="alert">Este registro conserva los importes y vencimientos reales de cada cuota.</div><div class="form-grid">
@@ -1159,6 +1166,7 @@
     }
     const loanId = form.dataset.loanId || '';
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
+    if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     const oldRows = existing ? loanInstallments(existing.id) : [];
     const installments = [];
     for (let index = 0; index < rows.length; index++) {
@@ -1283,6 +1291,7 @@
     const form = new FormData(event.currentTarget);
     const loanId = event.currentTarget.dataset.loanId || '';
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
+    if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     const enteredCapital = parseMoney(form.get('capital'));
     const capital = existing && enteredCapital === Math.round(Number(existing.capital)) ? Number(existing.capital) : enteredCapital;
     const rate = Number(form.get('rate'));
@@ -1361,7 +1370,7 @@
     const totals = loanTotals(loan);
     const paidCount = totals.installments.filter(item => dueLeft(item) <= 0).length;
     const pendingCount = totals.installments.length - paidCount;
-    const nextInstallment = totals.installments.find(item => dueLeft(item) > 0);
+    const nextInstallment = !loan.cancelled && totals.installments.find(item => dueLeft(item) > 0);
     const numbers = new Map();
     totals.installments.forEach(item => numbers.set(item.number, (numbers.get(item.number) || 0) + 1));
     const repeatedNumbers = [...numbers].filter(([, count]) => count > 1).map(([number]) => number);
@@ -1372,17 +1381,33 @@
       const historicalPaid = Math.min(Number(item.paidBeforeApp) || 0, Number(item.paid) || 0);
       const paidInApp = Math.max(0, item.paid - historicalPaid);
       const stateClass = paid ? 'paid' : item.dueDate < todayKey() ? 'overdue' : item.paid > 0 ? 'partial' : 'pending';
-      const undoButton = paidInApp > 0.005 || (!loan.historical && item.paid > 0.005 && !item.payments?.length)
+      const undoButton = !loan.cancelled && (paidInApp > 0.005 || (!loan.historical && item.paid > 0.005 && !item.payments?.length))
         ? `<button class="text-button undo-installment-payment" data-action="undo-installment-payment" data-id="${escapeHtml(item.id)}">Deshacer pago</button>` : '';
-      const collectButton = !paid && loan.disbursed !== false
+      const collectButton = !loan.cancelled && !paid && loan.disbursed !== false
         ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : '';
       return `<div class="installment-line ${paid ? 'installment-paid' : 'installment-pending'}"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span class="badge ${stateClass}">${paid ? 'Pagada' : item.dueDate < todayKey() ? 'Vencida' : item.paid > 0 ? 'Parcial' : 'Pendiente'}</span><span>Importe ${money(item.amount)} · Pagado ${money(item.paid)}</span>${historicalPaid > 0.005 ? `<small class="installment-origin">Pago histórico anterior a la aplicación: ${money(historicalPaid)}</small>` : ''}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${undoButton}${collectButton}</div></div>`;
     }).join('');
-    const toolbar = `<div class="loan-detail-actions"><span class="badge ${loan.historical ? 'partial' : 'paid'}">${loan.historical ? 'Histórico' : 'Normal'}</span><button class="secondary-button" data-action="edit-loan" data-id="${escapeHtml(loan.id)}">Editar</button><button class="danger-button" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar</button></div>`;
+    const toolbar = `<div class="loan-detail-actions"><span class="badge ${loan.historical ? 'partial' : 'paid'}">${loan.historical ? 'Histórico' : 'Normal'}</span><button class="secondary-button" data-action="edit-loan" data-id="${escapeHtml(loan.id)}" ${loan.cancelled?'disabled':''}>Editar</button><button type="button" class="${loan.cancelled?'primary-button':'secondary-button'}" data-action="toggle-loan-cancelled" data-id="${escapeHtml(loan.id)}">${loan.cancelled?'Reactivar préstamo':'Anular préstamo'}</button><button class="danger-button" data-action="delete-loan" data-id="${escapeHtml(loan.id)}">Eliminar</button></div>`;
     const renewalButton=window.LoanRenewal.eligible(loan,totals.installments)?`<button class="secondary-button full" style="margin-bottom:14px" data-action="renew-loan" data-id="${escapeHtml(loan.id)}">Renovar préstamo</button>`:'';
     const renewalHistory=Array.isArray(loan.renewals)&&loan.renewals.length?`<section class="section"><h3>Historial de renovaciones</h3><div class="list">${loan.renewals.map(r=>`<article class="card"><strong>${formatDate(r.previousDueDate)} → ${formatDate(r.newDueDate)}</strong><div class="kv-list"><div class="kv"><span>Saldo anterior sin cobrar</span><b>${money(r.previousBalance)}</b></div><div class="kv"><span>Nuevo interés acordado</span><b>${money(r.addedInterest)}</b></div><div class="kv"><span>Saldo al renovar</span><b>${money(r.newBalance)}</b></div></div>${r.note?`<p class="subtle">${escapeHtml(r.note)}</p>`:''}</article>`).join('')}</div></section>`:'';
     const duplicateWarning = repeatedNumbers.length ? `<div class="alert">Se detectaron cuotas repetidas (${repeatedNumbers.join(', ')}). No se fusionaron ni eliminaron porque pueden tener pagos vinculados. Revisá el historial antes de recalcular.</div>` : '';
-    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${renewalButton}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical || loan.renewals?.length ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${renewalHistory}${history}`);
+    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${loan.cancelled?'<div class="alert">Préstamo anulado. Se conservan sus importes, cuotas y cobros, pero no cuentan en el saldo, la proyección ni los avisos. Reactivalo para volver a incluirlo.</div>':''}${renewalButton}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical || loan.renewals?.length ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${renewalHistory}${history}`);
+  }
+
+  function toggleLoanCancelled(loanId) {
+    const loan=data.loans.find(l=>l.id===loanId);if(!loan)return;
+    const cancelled=loan.cancelled!==true;
+    const message=cancelled
+      ? `¿Anular el préstamo ${loan.code} de ${loan.person}? Sus entregas de dinero, cobros y cuotas dejarán de contar en el saldo, el dinero a futuro y los avisos. Los registros se conservan y podés reactivarlo después. Esto no registra una devolución real de dinero.`
+      : `¿Reactivar el préstamo ${loan.code} de ${loan.person}? Volverán a contar sus entregas, cobros y cuotas con los importes y fechas que ya estaban guardados.`;
+    if(!confirm(message))return;
+    try {
+      const candidate=LC.withCancelled(data,loanId,cancelled);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));
+      data=candidate;
+    } catch {showToast('No se pudo guardar el cambio. El préstamo y sus saldos siguen como antes.');return;}
+    window.DriveBackup?.changed();window.PushReminders?.changed();
+    render();openLoanDetail(loanId);showToast(cancelled?'Préstamo anulado; se recalcularon los saldos.':'Préstamo reactivado con sus registros originales.');
   }
 
   function deleteLoan(loanId) {
@@ -1405,6 +1430,7 @@
   }
 
   function undoInstallmentPayment(installmentId) {
+    if(LC.context(data).isCancelled({installmentId})){showToast('Reactivá el préstamo antes de modificar sus cobros.');return;}
     const installment = data.installments.find(item => item.id === installmentId);
     if (!installment || Number(installment.paid) <= 0.005) return;
     const historicalPaid = Math.min(Number(installment.paidBeforeApp) || 0, Number(installment.paid) || 0);
@@ -1429,7 +1455,7 @@
     if (!item) return;
     const loan = data.loans.find(row => row.id === item.loanId);
     const left = dueLeft(item);
-    if (!loan || loan.disbursed === false || left <= 0.005) return;
+    if (!loan || loan.cancelled || loan.disbursed === false || left <= 0.005) return;
     const suggested = Number.isInteger(left) ? left : Math.floor(left);
     const legacyFraction = !Number.isInteger(left);
     const amountField = legacyFraction
@@ -1447,7 +1473,7 @@
     const date = String(form.get('date'));
     const item = data.installments.find(row => row.id === installmentId);
     const loan = item && data.loans.find(row => row.id === item.loanId);
-    if (!item || !loan || loan.disbursed === false || !Number.isFinite(amount) || amount <= 0 || amount > dueLeft(item) + 0.005 || !parseDate(date)) {
+    if (!item || !loan || loan.cancelled || loan.disbursed === false || !Number.isFinite(amount) || amount <= 0 || amount > dueLeft(item) + 0.005 || !parseDate(date)) {
       showToast('El importe debe ser mayor a cero y no superar el saldo.'); return;
     }
     const payment = { id: id(), installmentId, loanId: loan.id, amount, date, note: String(form.get('note')).trim(), createdAt: new Date().toISOString() };
@@ -1514,7 +1540,7 @@
   function openMovementDetail(movementId) {
     const item = data.movements.find(row => row.id === movementId);
     if (!item) return;
-    const canRealize = item.status === 'Pendiente' || item.status === 'Programado';
+    const canRealize = !cancelledMovement(item) && (item.status === 'Pendiente' || item.status === 'Programado');
     const actionLabel = item.direction === 'in' ? 'Marcar realizado' : 'Marcar realizado';
     const eventDate = movementDisplayDate(item);
     const relatedLoan = item.loanId && data.loans.find(loan => loan.id === item.loanId);
@@ -1537,7 +1563,7 @@
 
   function realizeMovement(movementId) {
     const item = data.movements.find(row => row.id === movementId);
-    if (!item || !['Pendiente', 'Programado'].includes(item.status)) return;
+    if (!item || cancelledMovement(item) || !['Pendiente', 'Programado'].includes(item.status)) return;
     item.status = 'Realizado';
     item.date = todayKey();
     item.createdAt = new Date().toISOString();
@@ -1570,7 +1596,7 @@
     if (!backup.data.settings || typeof backup.data.settings !== 'object') return false;
     if (!['people', 'groups', 'loanTypes', 'cards'].every(key => backup.data[key].every(value => typeof value === 'string'))) return false;
     if (!backup.data.loans.every(loan => loan && typeof loan.id === 'string' && typeof loan.person === 'string' && Number.isFinite(loan.capital))) return false;
-    if (!backup.data.loans.every(loan=>window.LoanRenewal.validHistory(loan.renewals))) return false;
+    if (!backup.data.loans.every(loan=>LC.valid(loan)&&window.LoanRenewal.validHistory(loan.renewals))) return false;
     if (!backup.data.installments.every(item => item && typeof item.id === 'string' && typeof item.loanId === 'string' && Number.isFinite(item.amount) && Number.isFinite(item.paid))) return false;
     if (!backup.data.collections.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount))) return false;
     if (!backup.data.movements.every(item => item && typeof item.id === 'string' && Number.isFinite(item.amount) && ['in', 'out'].includes(item.direction))) return false;
@@ -1777,6 +1803,8 @@
     else if (action === 'new-loan') openLoanForm();
     else if (action === 'close-modal') closeModal();
     else if (action === 'renew-loan') openRenewLoan(button.dataset.id);
+    else if (action === 'toggle-loan-cancelled') toggleLoanCancelled(button.dataset.id);
+    else if (action === 'view-cancelled-loans') {page='loans';loanFilter='Anulado';render();}
     else if (action === 'loan-detail') openLoanDetail(button.dataset.id);
     else if (action === 'edit-loan') { const loan = data.loans.find(item => item.id === button.dataset.id); if (loan?.historical) openHistoricalLoanForm(button.dataset.id); else openLoanForm(button.dataset.id); }
     else if (action === 'view-loan') openLoanDetail(button.dataset.id);
@@ -1881,3 +1909,4 @@
   scheduleDateRefresh();
   registerServiceWorker().then(() => { checkDailyNotification(); scheduleNotificationTimeCheck(); });
 })();
+

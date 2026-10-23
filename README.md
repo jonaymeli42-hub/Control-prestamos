@@ -59,3 +59,28 @@ En **Movimientos → Resumen mensual · cobros y pagos** se puede consultar cual
 **Renovar préstamo:** en el detalle de un préstamo entregado de modalidad «1 cuota», con una sola cuota y saldo pendiente, se puede sumar un importe fijo de interés acordado y trasladar el vencimiento a una fecha posterior. Conserva la misma cuota, el capital y la entrega originales, los cobros vinculados y un historial con fechas y saldos anteriores; no crea cobros ni salidas de dinero. El interés no se capitaliza automáticamente. Se pueden seguir registrando pagos parciales desde el detalle. Las renovaciones viajan en los respaldos. La edición ordinaria de un préstamo renovado queda bloqueada para evitar recalcular y borrar el acuerdo; se usa la acción de renovación para posteriores acuerdos.
 
 El calendario de financiaciones conserva los vencimientos aun después de pagar: muestra Pendiente, Parcial o Pagada en la fecha de la obligación, con importes y fechas reales de los pagos en el detalle. Los movimientos y resúmenes financieros siguen usando las fechas reales. Los pagos mensuales anticipados se aplican al vencimiento más antiguo según el modelo existente. Si una financiación no tiene fecha válida, sus movimientos conservan la visualización anterior; no se inventan vencimientos ni fechas de pagos históricos.
+
+
+## Anular y reactivar préstamos
+
+En Préstamos, abrí el detalle y elegí Anular préstamo. Tras confirmar, el préstamo
+sigue guardado, pero sus entregas y cobros vinculados quedan fuera del saldo;
+sus cuotas quedan fuera de A recibir, Dinero a futuro, proyección, resumen mensual,
+calendario y avisos. No se crea una devolución ficticia ni se borran registros.
+Los movimientos conservan sus importes originales y se muestran como anulados.
+Mientras esté anulado no se edita, renueva ni registra o deshace un cobro.
+
+El mismo botón pasa a Reactivar préstamo y recupera los efectos de los registros
+originales, sin nuevos movimientos ni duplicados. Inicio muestra una advertencia
+cuando hay préstamos anulados y la lista permite filtrarlos por Anulado.
+Las financiaciones recibidas, los movimientos generales y las fotos históricas
+del dinero a futuro no se alteran. Los préstamos históricos sin entrega registrada
+no inventan un ingreso al anularse.
+
+El único dato añadido al préstamo es el booleano opcional `cancelled`. Se conserva
+en las copias JSON/Drive y al importar registros nuevos; las copias antiguas
+siguen siendo válidas. La importación mantiene su regla previa de no reemplazar
+registros que ya existen con el mismo ID. `loan-cancellation.js` resuelve enlaces
+por préstamo, cuota o cobro, incluyendo movimientos antiguos sin loanId.
+
+Verificación: `node --test tests/*.test.cjs tests/*.test.mjs`.
