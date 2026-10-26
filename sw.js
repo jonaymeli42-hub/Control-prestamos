@@ -1,5 +1,5 @@
-const CACHE_NAME = 'control-prestamos-shell-v34';
-const SHELL_FILES = ['./index.html', './styles.css', './app.js', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
+const CACHE_NAME = 'control-prestamos-shell-v35';
+const SHELL_FILES = ['./index.html', './styles.css', './app.js?v=edit-renewed-35', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
@@ -12,7 +12,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (new URL(event.request.url).pathname.endsWith('/drive-callback.html')) return;
   if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
-  event.respondWith(fetch(event.request).then(response => {
+  event.respondWith(fetch(new Request(event.request, { cache: 'no-cache' })).then(response => {
     if (response.ok) {
       const copy = response.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
