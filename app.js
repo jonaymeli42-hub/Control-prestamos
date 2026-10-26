@@ -1384,14 +1384,14 @@
     totals.installments.forEach(item => numbers.set(item.number, (numbers.get(item.number) || 0) + 1));
     const repeatedNumbers = [...numbers].filter(([, count]) => count > 1).map(([number]) => number);
     const payments = data.collections.filter(item => item.loanId === loan.id || totals.installments.some(row => row.id === item.installmentId)).sort((a, b) => b.date.localeCompare(a.date));
-    const history = payments.length ? `<section class="section"><div class="section-head"><h3>Historial de pagos</h3></div><div class="list">${payments.map(payment => `<article class="card"><div class="row-top"><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })} · Cuota ${totals.installments.find(row => row.id === payment.installmentId)?.number ?? '—'}</b><strong>${money(payment.amount)}</strong></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}</article>`).join('')}</div></section>` : '';
+    const history = payments.length ? `<section class="section"><div class="section-head"><h3>Historial de pagos</h3></div><div class="list">${payments.map(payment => `<article class="card"><div class="row-top"><b>${formatDate(payment.date, { day: 'numeric', month: 'short', year: 'numeric' })} · Cuota ${totals.installments.find(row => row.id === payment.installmentId)?.number ?? '—'}</b><strong>${money(payment.amount)}</strong></div>${payment.note ? `<div class="subtle">${escapeHtml(payment.note)}</div>` : ''}${!loan.cancelled ? `<button type="button" class="danger-button" style="margin-top:12px" data-action="undo-loan-payment" data-id="${escapeHtml(payment.id)}">Anular este pago</button>` : ''}</article>`).join('')}</div></section>` : '';
     const installments = totals.installments.map(item => {
       const paid = dueLeft(item) <= 0;
       const historicalPaid = Math.min(Number(item.paidBeforeApp) || 0, Number(item.paid) || 0);
       const paidInApp = Math.max(0, item.paid - historicalPaid);
       const stateClass = paid ? 'paid' : item.dueDate < todayKey() ? 'overdue' : item.paid > 0 ? 'partial' : 'pending';
       const undoButton = !loan.cancelled && (paidInApp > 0.005 || (!loan.historical && item.paid > 0.005 && !item.payments?.length))
-        ? `<button class="text-button undo-installment-payment" data-action="undo-installment-payment" data-id="${escapeHtml(item.id)}">Deshacer pago</button>` : '';
+        ? `<button class="text-button undo-installment-payment" data-action="undo-installment-payment" data-id="${escapeHtml(item.id)}">Deshacer todos los pagos</button>` : '';
       const collectButton = !loan.cancelled && !paid && loan.disbursed !== false
         ? `<button class="text-button" data-action="pay-installment" data-id="${escapeHtml(item.id)}">Cobrar</button>` : '';
       return `<div class="installment-line ${paid ? 'installment-paid' : 'installment-pending'}"><div class="due"><strong>Cuota ${item.number} · ${formatDate(item.dueDate, { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span class="badge ${stateClass}">${paid ? 'Pagada' : item.dueDate < todayKey() ? 'Vencida' : item.paid > 0 ? 'Parcial' : 'Pendiente'}</span><span>Importe ${money(item.amount)} · Pagado ${money(item.paid)}</span>${historicalPaid > 0.005 ? `<small class="installment-origin">Pago histórico anterior a la aplicación: ${money(historicalPaid)}</small>` : ''}</div><div style="text-align:right"><div class="due-amount">${money(dueLeft(item))}</div>${undoButton}${collectButton}</div></div>`;
@@ -1436,6 +1436,29 @@
       return !['Préstamo dado', 'Préstamo entregado', 'Cobro préstamo'].includes(item.type);
     });
     persist(); closeModal(); render(); showToast('Préstamo e información asociada eliminados.');
+  }
+
+  function undoLoanPayment(paymentId) {
+    const payment = data.collections.find(item => item.id === paymentId);
+    if (!payment) return;
+    const installment = data.installments.find(item => item.id === payment.installmentId || (item.payments || []).includes(payment.id));
+    if (!installment) { showToast('No se encontró la cuota vinculada a este pago.'); return; }
+    const loan = data.loans.find(item => item.id === installment.loanId);
+    if (!loan || loan.cancelled) { showToast('Reactivá el préstamo antes de modificar sus cobros.'); return; }
+    const amount = Number(payment.amount);
+    const paid = roundMoney(Number(installment.paid) - amount);
+    const historicalPaid = Number(installment.paidBeforeApp) || 0;
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(paid) || paid < historicalPaid - 0.005) {
+      showToast('El pago no coincide con el total cobrado de la cuota. Revisá sus datos antes de anularlo.'); return;
+    }
+    if (!window.confirm(`¿Anular únicamente el pago de ${money(amount)} del ${formatDate(payment.date)} de ${loan.code}? Este importe volverá a quedar pendiente y se quitará su ingreso de dinero. Los demás pagos se conservan.`)) return;
+    installment.paid = Math.max(historicalPaid, paid);
+    installment.status = installment.paid >= Number(installment.amount) - 0.005 ? 'Pagado' : installment.paid > 0.005 ? 'Parcial' : 'Pendiente';
+    installment.payments = (installment.payments || []).filter(id => id !== payment.id);
+    data.collections = data.collections.filter(item => item.id !== payment.id);
+    data.movements = data.movements.filter(item => item.collectionId !== payment.id);
+    persist(); closeModal(); render(); openLoanDetail(loan.id);
+    showToast('Pago anulado. El importe volvió a quedar pendiente.');
   }
 
   function undoInstallmentPayment(installmentId) {
@@ -1821,6 +1844,7 @@
     else if (action === 'toggle-projection') { projectionExpanded = !projectionExpanded; render(); }
     else if (action === 'delete-loan') deleteLoan(button.dataset.id);
     else if (action === 'pay-installment') openPayForm(button.dataset.id);
+    else if (action === 'undo-loan-payment') undoLoanPayment(button.dataset.id);
     else if (action === 'undo-installment-payment') undoInstallmentPayment(button.dataset.id);
     else if (action === 'loan-filter') { loanFilter = button.dataset.value; render(); }
     else if (action === 'general-filter') {generalFilter=button.dataset.value;render();}
