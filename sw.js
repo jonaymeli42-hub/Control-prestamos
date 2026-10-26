@@ -1,4 +1,4 @@
-const CACHE_NAME = 'control-prestamos-shell-v33';
+const CACHE_NAME = 'control-prestamos-shell-v34';
 const SHELL_FILES = ['./index.html', './styles.css', './app.js', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {

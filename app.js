@@ -1024,7 +1024,7 @@
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
     if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
-    if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
+    if (existing?.renewals?.length) { openHistoricalLoanForm(loanId); return; }
     const deliveryDate = existing?.deliveryDate || todayKey();
     const firstDue = existing?.firstDue || addDate(deliveryDate, 0, 1);
     const body = `<form id="loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="form-grid">
@@ -1108,7 +1108,7 @@
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if (loanId && !existing) return;
     if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
-    if(existing?.renewals?.length){showToast('Este préstamo tiene renovaciones. Usá Renovar préstamo para cambiar interés o vencimiento; sus pagos se registran desde Cobrar.');return;}
+
     const existingRows = existing ? loanInstallments(existing.id).sort((a, b) => a.number - b.number).map(item => ({ dueDate: item.dueDate, amount: formatIntegerInput(item.amount), state: Number(item.paid) >= Number(item.amount) ? 'paid' : Number(item.paid) > 0 ? 'partial' : 'pending', paid: formatIntegerInput(item.paid) })) : [];
     const body = `<form id="historical-loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="alert">Este registro conserva los importes y vencimientos reales de cada cuota.</div><div class="form-grid">
       <div class="field"><label for="historical-code">Código / referencia</label><input id="historical-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80"></div>
@@ -1123,6 +1123,12 @@
     openModal(existing ? `Editar préstamo ${existing.code}` : 'Nuevo préstamo histórico', existing ? existing.person : 'Cuotas anteriores a la aplicación', body);
     const form = modalRoot.querySelector('#historical-loan-form');
     if (existingRows.length) renderHistoricalInstallmentRows(form, existingRows);
+    if (existing?.renewals?.length) {
+      form.querySelector('.alert').textContent = 'Préstamo renovado: editá los datos, importes y vencimientos reales sin recalcular intereses. Los cobros y el historial de renovaciones se conservan. Para registrar un pago, usá Cobrar.';
+      form.elements.count.readOnly = true;
+      form.elements.mode.disabled = true;
+      form.querySelectorAll('[data-historical-state], [data-historical-paid]').forEach(input => { input.disabled = true; });
+    }
     form.dataset.defaultsDeliveryDate = form.elements.deliveryDate.value;
     form.dataset.defaultsMode = form.elements.mode.value;
     if (!existingRows.length) renderHistoricalInstallmentRows(form);
@@ -1136,6 +1142,7 @@
       form.dataset.defaultsDeliveryDate = form.elements.deliveryDate.value || todayKey();
       form.dataset.defaultsMode = form.elements.mode.value;
       renderHistoricalInstallmentRows(form, previous);
+      if (existing?.renewals?.length) form.querySelectorAll('[data-historical-state], [data-historical-paid]').forEach(input => { input.disabled = true; });
     };
     form.elements.count.addEventListener('change', refreshRows);
     form.elements.count.addEventListener('blur', refreshRows);
@@ -1168,6 +1175,7 @@
     const existing = loanId ? data.loans.find(item => item.id === loanId) : null;
     if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     const oldRows = existing ? loanInstallments(existing.id) : [];
+    if (existing?.renewals?.length && count !== oldRows.length) { showToast('Conservá la cantidad de cuotas del préstamo renovado.'); return; }
     const installments = [];
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
@@ -1175,10 +1183,11 @@
       const paidInput = parseMoney(row.paid);
       let paid = row.state === 'paid' ? amount : row.state === 'partial' ? paidInput : 0;
       const old = oldRows.find(item => item.number === index + 1);
+      if (existing?.renewals?.length && old) paid = Number(old.paid) || 0;
       const paidInApp = old ? Math.max(0, Number(old.paid || 0) - Number(old.paidBeforeApp || 0)) : 0;
       if (paid + 0.005 < paidInApp || amount + 0.005 < Number(old?.paid || 0)) { showToast(`La cuota ${index + 1} no puede quedar por debajo de sus pagos registrados.`); return; }
       paid = Math.max(paid, paidInApp);
-      if (!parseDate(row.dueDate) || row.dueDate < deliveryDate || !Number.isFinite(amount) || amount <= 0 || !['pending', 'paid', 'partial'].includes(row.state) || (row.state === 'partial' && (!Number.isFinite(paidInput) || paidInput <= 0 || paidInput >= amount))) {
+      if (!parseDate(row.dueDate) || row.dueDate < deliveryDate || !Number.isFinite(amount) || amount <= 0 || !['pending', 'paid', 'partial'].includes(row.state) || (!existing?.renewals?.length && row.state === 'partial' && (!Number.isFinite(paidInput) || paidInput <= 0 || paidInput >= amount))) {
         showToast(`Revisá el importe, vencimiento y estado de la cuota ${index + 1}.`); return;
       }
       installments.push({ ...(old || {}), id: old?.id || id(), number: index + 1, dueDate: row.dueDate, amount, paid, paidBeforeApp: old ? Math.min(Number(old.paidBeforeApp) || 0, paid) : paid, status: paid >= amount ? 'Pagado' : paid > 0 ? 'Parcial' : 'Pendiente', payments: old?.payments || [] });
@@ -1187,7 +1196,7 @@
       ...(existing || {}), id: loanId || id(),
       code: String(values.get('code') || '').trim() || existing?.code || `HIST-${String(data.loans.filter(item => item.historical).length + 1).padStart(3, '0')}`,
       person,
-      mode: String(values.get('mode')),
+      mode: existing?.renewals?.length ? existing.mode : String(values.get('mode')),
       capital: Math.round(capital),
       rate,
       rateRecorded: true,
