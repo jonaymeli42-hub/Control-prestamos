@@ -1,5 +1,5 @@
-const CACHE_NAME = 'control-prestamos-shell-v36';
-const SHELL_FILES = ['./index.html', './styles.css', './app.js?v=individual-payment-36', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
+const CACHE_NAME = 'control-prestamos-shell-v37';
+const SHELL_FILES = ['./index.html', './financing-link.js?v=1', './styles.css', './app.js?v=card-link-1', './financing-calendar.js?v=1', './loan-cancellation.js?v=1', './loan-renewal.js?v=loan-cancellation-1', './monthly-summary.js?v=1', './financing-overview.js?v=1', './salary-savings.js?v=returns-1', './push-reminders.js?v=morning-1', './financing-model.js?v=received-installments-1', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png', './drive-backup.js', './drive-backup.css', './drive-respaldos.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

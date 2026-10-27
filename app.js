@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const Link = window.FinancingLink;
   const F = window.ReceivedFinancing;
   const S = window.SalarySavings;
   const LC = window.LoanCancellation;
@@ -39,6 +40,7 @@
   };
 
   let data = loadData();
+  let dataSnapshot = localStorage.getItem(STORAGE_KEY);
   const startupParams = new URLSearchParams(window.location.search);
   let page = ['home', 'loans', 'collections', 'calendar', 'movements', 'cards', 'more', 'salary', 'general'].includes(startupParams.get('page')) ? startupParams.get('page') : 'home';
   let calendarSelectedDate = parseDate(startupParams.get('date')) ? dateKey(startupParams.get('date')) : todayKey();
@@ -134,7 +136,10 @@
   }
 
   function persist() {
+    if(localStorage.getItem(STORAGE_KEY)!==dataSnapshot)throw Error('Los datos cambiaron en otra ventana. Volvé a abrir la app antes de guardar.');
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    dataSnapshot=localStorage.getItem(STORAGE_KEY);
+    Link.reconcile(localStorage);
     window.DriveBackup?.changed();
     window.PushReminders?.changed();
   }
@@ -298,7 +303,7 @@
     const record = { id: id(), date: dateKey(now), savedAt: now.toISOString(), amount: futureMoney(), source };
     const candidate = { ...data, futureHistory: [...data.futureHistory, record] };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));dataSnapshot=localStorage.getItem(STORAGE_KEY);
     } catch (_) {
       showToast('No se pudo guardar el monto. Conservá una copia de tus datos.');
       return false;
@@ -731,6 +736,14 @@
     return `<article class="card" data-action="financing-detail" data-id="${escapeHtml(financing.id)}"><div class="row-top"><div><div class="person">${escapeHtml(financing.card)}</div><div class="subtle">${financing.historical ? 'Histórica · recibida' : financing.received === false ? 'Recibir' : 'Recibido'} ${formatDate(financing.receivedDate, { day: 'numeric', month: 'short', year: 'numeric' })}</div></div><span class="badge ${badgeClass}">${status}</span></div><div class="inline-details"><span>Recibido <b>${money(financing.receivedAmount)}</b></span><span>Devolver <b>${money(financing.totalToRepay)}</b></span><span>Pagado <b>${money(financing.paid)}</b></span><span>Saldo <b>${money(balance)}</b></span></div>${F.isMonthly(financing) ? `<div class="subtle">${F.isInstallments(financing)?'Cuotas normales':'Interés mensual + capital final'} · ${financing.monthCount} meses · ${formatInterestPercent(financing.interestValue)}% mensual</div>` : ''}${financing.nextPaymentDate && balance > 0 ? `<div class="subtle" style="margin-top:9px">Próximo pago previsto: ${formatDate(financing.nextPaymentDate)}</div>` : ''}</article>`;
   }
 
+  function financingLinkFields(existing) {
+    let cards=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))cards=saved.cards.map(c=>c.name);}catch(_){}
+    if(existing?.cardLink?.card&&!cards.includes(existing.cardLink.card))cards.push(existing.cardLink.card);
+    const link=existing?.cardLink;
+    return `<fieldset id="financing-link-box" class="card full-span"><legend>Control Tarjetas</legend><label><input type="checkbox" name="linkCard" ${link?'checked':''}> Registrar también en Control Tarjetas</label><div id="financing-link-fields"><label class="field">Tarjeta en Control Tarjetas<select name="linkedCard"><option value="">Elegí una tarjeta</option>${cards.map(c=>`<option value="${escapeHtml(c)}" ${c===link?.card?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></label><label class="field">Fecha del consumo<input name="linkedDate" type="date" value="${escapeHtml(link?.date||existing?.receivedDate||todayKey())}"></label><label class="field">Mes de vencimiento de la tarjeta<input name="linkedMonth" type="month" value="${escapeHtml(link?.month||'')}"></label><p class="subtle">Se registra el total a devolver como consumo en 1 pago, clasificado Préstamos. Elegí el mes en que vas a pagar el resumen.</p></div><p class="subtle">Funciona en el mismo dispositivo y navegador. Cada app conserva su respaldo en Drive; abrí Tarjetas para enviar su copia. ${cards.length?'':'Abrí primero Control Tarjetas con tus datos para elegir una tarjeta.'}</p></fieldset>`;
+  }
+  function linkNotice(f){return f.cardLink?`<section class="card"><b>${escapeHtml(Link.status(localStorage,f))}</b><p class="subtle">${escapeHtml(f.cardLink.card)} · Vencimiento ${escapeHtml(f.cardLink.month)} · ${money(f.totalToRepay)}</p><button type="button" class="secondary-button" data-action="retry-card-link" data-id="${escapeHtml(f.id)}">Comprobar / reintentar</button> <a class="secondary-button" href="/Control-tarjetas/?screen=movements">Abrir Tarjetas</a><p class="subtle">Los pagos se registran por separado en cada app. Esta vinculación registra el consumo, no un segundo ingreso.</p></section>`:'';}
+
   function openFinancingForm(financingId = '') {
     const existing = financingId ? data.cardFinancings.find(item => item.id === financingId) : null;
     if (financingId && !existing) return;
@@ -738,7 +751,7 @@
     const interestType = existing?.interestType || 'amount';
     const interestValue = existing ? (existing.interestValue ?? existing.charges ?? 0) : 0;
     const monthly = F.isMonthly(existing);
-    const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field full-span"><label for="financing-mode">Modalidad</label><select id="financing-mode" name="repaymentMode"><option value="single" ${!monthly?'selected':''}>Financiación de tarjeta / cargos únicos</option><option value="monthly-bullet" ${existing?.repaymentMode==='monthly-bullet'?'selected':''}>Interés mensual + capital final (recibida)</option><option value="installments" ${F.isInstallments(existing)?'selected':''}>Cuotas normales (recibida)</option></select></div><div class="field" id="financing-card-field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field" id="financing-lender-field"><label for="financing-lender">Persona que me presta</label><input id="financing-lender" name="lender" maxlength="100" value="${escapeHtml(monthly?existing.card:'')}" placeholder="Nombre de tu amigo"></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type" id="financing-interest-label">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field" id="financing-single-date-field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field" id="financing-month-count-field"><label for="financing-month-count">Cantidad de meses</label><input id="financing-month-count" name="monthCount" type="number" min="1" max="240" step="1" value="${monthly?existing.monthCount:1}"></div><div class="field" id="financing-first-due-field"><label for="financing-first-due">Primer vencimiento</label><input id="financing-first-due" name="firstDueDate" type="date" value="${monthly?existing.firstDueDate:F.nextMonthDate(existing?.receivedDate || todayKey())}"></div><div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div id="financing-schedule-preview" class="section"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
+    const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field full-span"><label for="financing-mode">Modalidad</label><select id="financing-mode" name="repaymentMode"><option value="single" ${!monthly?'selected':''}>Financiación de tarjeta / cargos únicos</option><option value="monthly-bullet" ${existing?.repaymentMode==='monthly-bullet'?'selected':''}>Interés mensual + capital final (recibida)</option><option value="installments" ${F.isInstallments(existing)?'selected':''}>Cuotas normales (recibida)</option></select></div><div class="field" id="financing-card-field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field" id="financing-lender-field"><label for="financing-lender">Persona que me presta</label><input id="financing-lender" name="lender" maxlength="100" value="${escapeHtml(monthly?existing.card:'')}" placeholder="Nombre de tu amigo"></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type" id="financing-interest-label">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field" id="financing-single-date-field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field" id="financing-month-count-field"><label for="financing-month-count">Cantidad de meses</label><input id="financing-month-count" name="monthCount" type="number" min="1" max="240" step="1" value="${monthly?existing.monthCount:1}"></div><div class="field" id="financing-first-due-field"><label for="financing-first-due">Primer vencimiento</label><input id="financing-first-due" name="firstDueDate" type="date" value="${monthly?existing.firstDueDate:F.nextMonthDate(existing?.receivedDate || todayKey())}"></div>${financingLinkFields(existing)}<div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div id="financing-schedule-preview" class="section"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
     openModal(existing ? 'Editar financiación' : 'Nueva financiación', existing ? existing.card : 'Registrá cuánto recibiste y cuánto debés devolver.', body);
     const form = modalRoot.querySelector('#financing-form');
     form.addEventListener('submit', saveFinancing);
@@ -795,6 +808,9 @@
       else {value.inputMode=type.value==='percent'?'decimal':'numeric';value.toggleAttribute('data-money-input',type.value==='amount');}
       const label=form.querySelector('#financing-interest-label');label.textContent=monthly?'Tasa mensual (%)':'Intereses / cargos';label.htmlFor=monthly?'financing-interest-value':'financing-interest-type';preview();
     };
+    const linkFields=()=>{const single=mode.value==='single';const checked=single&&form.elements.linkCard.checked;form.querySelector('#financing-link-box').hidden=!single;form.elements.linkCard.disabled=!single;form.querySelector('#financing-link-fields').hidden=!checked;['linkedCard','linkedDate','linkedMonth'].forEach(name=>{form.elements[name].disabled=!checked;form.elements[name].required=checked;});};
+    form.elements.linkCard.addEventListener('change',linkFields);
+    mode.addEventListener('change',linkFields);linkFields();
     mode.addEventListener('change',modeFields);
     [value, amount,form.elements.monthCount,form.elements.firstDueDate,form.elements.receivedDate].forEach(input => input.addEventListener('input', preview));
     modeFields();
@@ -825,6 +841,7 @@
     const values = new FormData(form);
     const existing = data.cardFinancings.find(item => item.id === form.dataset.financingId);
     if (existing) syncFinancingPaid(existing);
+    if(existing?.cardLink&&values.get('repaymentMode')!=='single'){showToast('Primero desmarcá la vinculación y guardá antes de cambiar la modalidad.');return;}
     if (['monthly-bullet','installments'].includes(values.get('repaymentMode'))) { saveMonthlyFinancing(form,values,existing); return; }
     const receivedAmount = parseMoney(values.get('receivedAmount'));
     const interestType = String(values.get('interestType')) === 'percent' ? 'percent' : 'amount';
@@ -835,13 +852,20 @@
     if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(interestValue) || interestValue < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto, los intereses y las fechas de la financiación.'); return; }
     if (existing && F.isMonthly(existing) && existing.paid > 0 && !confirm('Se cambiará esta financiación a cargos únicos y se conservarán sus pagos. ¿Continuar?')) return;
     if (existing && existing.paid > roundMoney(receivedAmount + charges) + 0.005) { showToast('El total a devolver no puede ser menor que los pagos ya registrados.'); return; }
+    const cardLink=values.get('linkCard')==='on'?{version:1,card:String(values.get('linkedCard')||''),date:String(values.get('linkedDate')||''),month:String(values.get('linkedMonth')||'')}:null;
+    if(cardLink&&!Link.validLink(cardLink)){showToast('Elegí la tarjeta, la fecha del consumo y el mes de vencimiento.');return;}
+    if(existing?.cardLink&&!cardLink&&!confirm('¿Quitar también el consumo vinculado de Control Tarjetas? La financiación seguirá en Préstamos.'))return;
+    if(cardLink&&!existing?.cardLink){let target;try{target=JSON.parse(localStorage.getItem(Link.TARGET));}catch(_){}if(Link.validCards(target)&&target.onePayments.some(row=>!Link.linked(row)&&row.card===cardLink.card&&row.month===cardLink.month&&row.date===cardLink.date&&Math.abs(Number(row.amount)-roundMoney(receivedAmount+charges))<0.005)&&!confirm('Ya hay un consumo manual con la misma tarjeta, fecha, vencimiento e importe. Para evitar duplicarlo, cancelá y revisalo primero. ¿Crear otro consumo igualmente?'))return;}
+    const before=structuredClone(data);
     const financing = existing || { id: id(), paid: 0, legacyPaid: 0, createdAt: new Date().toISOString(), payments: [] };
     const historical = values.get('historical') === 'on';
     Object.assign(financing, { repaymentMode:'single', card: String(values.get('card')), receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
+    if(cardLink)financing.cardLink=cardLink;else if(financing.cardLink){data.cardLinkRemovals=[...new Set([...(data.cardLinkRemovals||[]),financing.id])];delete financing.cardLink;}
     syncFinancingPaid(financing);
     if (!existing) data.cardFinancings.unshift(financing);
     syncFinancingReceiptMovement(financing);
-    persist(); closeModal(); page = 'cards'; render(); showToast(financing.historical ? 'Financiación histórica guardada; la deuda quedó registrada.' : existing ? 'Financiación actualizada y saldos recalculados.' : 'Financiación registrada y dinero sumado.');
+    try{persist();}catch(error){data=before;showToast('No se guardó: '+error.message);return;}
+    closeModal(); page = 'cards'; render();if(cardLink){openFinancingDetail(financing.id);showToast(Link.status(localStorage,financing));return;} showToast(financing.historical ? 'Financiación histórica guardada; la deuda quedó registrada.' : existing ? 'Financiación actualizada y saldos recalculados.' : 'Financiación registrada y dinero sumado.');
   }
 
   function openFinancingDetail(financingId) {
@@ -858,24 +882,26 @@
     const schedule = F.isMonthly(financing) ? `<section class="section"><h3>Vencimientos mensuales</h3><p class="subtle">Los pagos se aplican al vencimiento más antiguo pendiente. Podés registrar pagos parciales o anticipados.</p>${renderReceivedSchedule(financing)}</section>` : '';
     const controls = financing.received !== false && financingBalance(financing) > 0.005 ? `<div class="form-actions">${!F.isMonthly(financing)?`<button class="secondary-button" data-action="schedule-card-payment" data-id="${escapeHtml(financing.id)}">Programar fecha</button>`:''}<button class="primary-button" data-action="pay-card" data-id="${escapeHtml(financing.id)}">Registrar pago</button></div>` : '';
     const admin = `<div class="loan-detail-actions"><button class="secondary-button" data-action="edit-financing" data-id="${escapeHtml(financing.id)}">Editar</button><button class="danger-button" data-action="delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`;
-    openModal(financing.card, 'Detalle de financiación', `${admin}<div class="card kv-list"><div class="kv"><span>Fecha en que recibí el dinero</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div><div class="kv"><span>Próxima fecha prevista</span><b>${financing.nextPaymentDate ? formatDate(financing.nextPaymentDate) : 'Sin fecha'}</b></div><div class="kv"><span>Tipo</span><b>${financing.historical ? 'Histórica' : 'Normal'}</b></div></div>${controls}${schedule}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
+    openModal(financing.card, 'Detalle de financiación', `${admin}${linkNotice(financing)}<div class="card kv-list"><div class="kv"><span>Fecha en que recibí el dinero</span><b>${formatDate(financing.receivedDate)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Intereses / cargos</span><b>${money(financing.charges)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div><div class="kv"><span>Próxima fecha prevista</span><b>${financing.nextPaymentDate ? formatDate(financing.nextPaymentDate) : 'Sin fecha'}</b></div><div class="kv"><span>Tipo</span><b>${financing.historical ? 'Histórica' : 'Normal'}</b></div></div>${controls}${schedule}<section class="section"><div class="section-head"><h3>Pagos registrados</h3></div>${history}</section>`);
   }
 
   function openDeleteFinancing(financingId) {
     const financing = data.cardFinancings.find(item => item.id === financingId);
     if (!financing) return;
     syncFinancingPaid(financing);
-    openModal('¿Eliminar financiación?', 'Se quitarán también sus pagos y movimientos vinculados.', `<div class="card kv-list"><div class="kv"><span>Tarjeta</span><b>${escapeHtml(financing.card)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><div class="form-actions"><button class="secondary-button" data-action="close-modal">Cancelar</button><button class="danger-button" data-action="confirm-delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`);
+    openModal('¿Eliminar financiación?', 'Se quitarán sus pagos, movimientos y el consumo vinculado en Tarjetas, si lo tiene.', `<div class="card kv-list"><div class="kv"><span>Tarjeta</span><b>${escapeHtml(financing.card)}</b></div><div class="kv"><span>Monto recibido</span><b>${money(financing.receivedAmount)}</b></div><div class="kv"><span>Total a devolver</span><b>${money(financing.totalToRepay)}</b></div><div class="kv"><span>Pagado</span><b>${money(financing.paid)}</b></div><div class="kv"><span>Saldo pendiente</span><b>${money(financingBalance(financing))}</b></div></div><div class="form-actions"><button class="secondary-button" data-action="close-modal">Cancelar</button><button class="danger-button" data-action="confirm-delete-financing" data-id="${escapeHtml(financing.id)}">Eliminar</button></div>`);
   }
 
   function deleteFinancing(financingId) {
     const financing = data.cardFinancings.find(item => item.id === financingId);
     if (!financing) return;
+    const before=structuredClone(data);
+    if(financing.cardLink)data.cardLinkRemovals=[...new Set([...(data.cardLinkRemovals||[]),financingId])];
     const paymentIds = new Set(data.cardPayments.filter(item => item.financingId === financingId).map(item => item.id));
     data.cardFinancings = data.cardFinancings.filter(item => item.id !== financingId);
     data.cardPayments = data.cardPayments.filter(item => item.financingId !== financingId);
     data.movements = data.movements.filter(item => item.cardFinancingId !== financingId && !paymentIds.has(item.cardPaymentId));
-    persist(); closeModal(); render(); showToast('Financiación, pagos y movimientos vinculados eliminados.');
+    try{persist();}catch(error){data=before;showToast('No se eliminó: '+error.message);return;} closeModal(); render(); showToast('Financiación eliminada. Si Tarjetas no está disponible, su eliminación se reintentará al abrirla.');
   }
 
   function openCardPaymentEdit(paymentId) {
@@ -1366,7 +1392,7 @@
         if(!form.elements.interest.value.trim())throw Error('Ingresá el nuevo interés acordado.');
         const result=window.LoanRenewal.renew(current,currentRows,{interest:parseMoney(form.elements.interest.value),dueDate:form.elements.dueDate.value,note:form.elements.note.value,createdAt:new Date().toISOString(),renewalId});
         const candidate={...data,loans:data.loans.map(l=>l.id===loanId?result.loan:l),installments:data.installments.map(i=>i.id===row.id?result.installment:i)};
-        localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));data=candidate;
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));dataSnapshot=localStorage.getItem(STORAGE_KEY);data=candidate;
         window.DriveBackup?.changed();window.PushReminders?.changed();
         closeModal();render();openLoanDetail(loanId);showToast('Renovación guardada. Podés registrar pagos parciales.');
       }catch(error){showToast(error.message||'No se pudo guardar la renovación.');}
@@ -1412,7 +1438,7 @@
     if(!confirm(message))return;
     try {
       const candidate=LC.withCancelled(data,loanId,cancelled);
-      localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(candidate));dataSnapshot=localStorage.getItem(STORAGE_KEY);
       data=candidate;
     } catch {showToast('No se pudo guardar el cambio. El préstamo y sus saldos siguen como antes.');return;}
     window.DriveBackup?.changed();window.PushReminders?.changed();
@@ -1635,6 +1661,8 @@
     if(!backup.data.movements.every(item=>!S.isTransfer(item)||S.valid(item)))return false;
     for (const key of ['cardFinancings', 'cardPayments']) if (backup.data[key] !== undefined && !Array.isArray(backup.data[key])) return false;
     if (!(backup.data.cardFinancings || []).every(item => item && typeof item.id === 'string' && Number.isFinite(item.receivedAmount) && Number.isFinite(item.totalToRepay) && Number.isFinite(item.paid) && (!F.isMonthly(item) || (F.valid(item) && Math.abs(F.totals(item).total-item.totalToRepay)<0.005 && item.paid>=0 && item.paid<=item.totalToRepay+0.005)))) return false;
+    if(!Link.validSource({...backup.data,cardFinancings:backup.data.cardFinancings||[]}))return false;
+    if(!(backup.data.cardFinancings||[]).every(f=>f.cardLink===undefined||Link.validLink(f.cardLink)&&f.repaymentMode==='single'))return false;
     if (!(backup.data.cardPayments || []).every(item => item && typeof item.id === 'string' && typeof item.financingId === 'string' && Number.isFinite(item.amount))) return false;
     if (backup.data.historical !== undefined && (!Array.isArray(backup.data.historical) || !backup.data.historical.every(item => item && typeof item.id === 'string' && typeof item.label === 'string' && Number.isFinite(item.amount)))) return false;
     if (backup.data.futureHistory !== undefined && (!Array.isArray(backup.data.futureHistory) || !backup.data.futureHistory.every(validFutureRecord))) return false;
@@ -1652,6 +1680,7 @@
         }
       }
     }
+    merged.cardLinkRemovals=[...new Set([...(current.cardLinkRemovals||[]),...(incoming.cardLinkRemovals||[])])];
     for (const key of ['people', 'groups', 'loanTypes', 'cards']) {
       const existingValues = new Set(merged[key].map(value => String(value).trim().toLocaleLowerCase()));
       for (const value of incoming[key]) {
@@ -1692,7 +1721,7 @@
     try {
       const merged = mergeBackupData(data, pendingImport.data);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-      data = merged;
+      data = merged;dataSnapshot=localStorage.getItem(STORAGE_KEY);Link.reconcile(localStorage);
       pendingImport = null;
       closeModal();
       page = 'loans'; loanFilter = 'Todos'; render();
@@ -1874,6 +1903,7 @@
     else if (action === 'new-movement' || action === 'new-income') openMovementForm();
     else if(action==='summary-month'){summaryMonth=button.dataset.month;render();}
     else if(action==='financing-month'){financingMonth=button.dataset.month;render();}
+    else if(action==='retry-card-link'){const result=Link.reconcile(localStorage);openFinancingDetail(button.dataset.id);showToast(result.error||Link.status(localStorage,data.cardFinancings.find(f=>f.id===button.dataset.id)));}
     else if (action === 'new-financing') openFinancingForm();
     else if (action === 'financing-detail') openFinancingDetail(button.dataset.id);
     else if (action === 'edit-financing') openFinancingForm(button.dataset.id);
@@ -1930,9 +1960,13 @@
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDateDependentViews(); });
   window.addEventListener('focus', refreshDateDependentViews);
+  Link.reconcile(localStorage);
+  window.addEventListener('storage',event=>{if(event.key===Link.TARGET){Link.reconcile(localStorage);if(page==='cards')render();}if(event.key===STORAGE_KEY){data=loadData();dataSnapshot=localStorage.getItem(STORAGE_KEY);closeModal();render();showToast('Datos actualizados desde otra ventana.');}});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)Link.reconcile(localStorage);});
   recordFutureAmount();
   render();
-  window.DriveBackup?.init({ app: 'prestamos', getBackup: () => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: structuredClone(data) }) });
+  const linkedEdit=startupParams.get('editFinancing');if(linkedEdit)openFinancingForm(linkedEdit);
+  window.DriveBackup?.init({ app: 'prestamos', getBackup: () => ({ format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), data: structuredClone(JSON.parse(localStorage.getItem(STORAGE_KEY))||data) }) });
   window.PushReminders?.init({register:registerServiceWorker,days:()=>{
     const days=new Map();
     pendingInstallments().forEach(item=>{const cents=Math.round(dueLeft(item)*100);if(item.dueDate<todayKey()||cents<=0)return;const day=days.get(item.dueDate)||{date:item.dueDate,count:0,cents:0};day.count++;day.cents+=cents;days.set(item.dueDate,day);});
