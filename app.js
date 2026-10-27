@@ -740,7 +740,7 @@
     let cards=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))cards=saved.cards.map(c=>c.name);}catch(_){}
     if(existing?.cardLink?.card&&!cards.includes(existing.cardLink.card))cards.push(existing.cardLink.card);
     const link=existing?.cardLink;
-    return `<fieldset id="financing-link-box" class="card full-span"><legend>Control Tarjetas</legend><label><input type="checkbox" name="linkCard" ${link?'checked':''}> Registrar también en Control Tarjetas</label><div id="financing-link-fields"><label class="field">Tarjeta en Control Tarjetas<select name="linkedCard"><option value="">Elegí una tarjeta</option>${cards.map(c=>`<option value="${escapeHtml(c)}" ${c===link?.card?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></label><label class="field">Fecha del consumo<input name="linkedDate" type="date" value="${escapeHtml(link?.date||existing?.receivedDate||todayKey())}"></label><label class="field">Mes de vencimiento de la tarjeta<input name="linkedMonth" type="month" value="${escapeHtml(link?.month||'')}"></label><p class="subtle">Se registra el total a devolver como consumo en 1 pago, clasificado Préstamos. Elegí el mes en que vas a pagar el resumen.</p></div><p class="subtle">Funciona en el mismo dispositivo y navegador. Cada app conserva su respaldo en Drive; abrí Tarjetas para enviar su copia. ${cards.length?'':'Abrí primero Control Tarjetas con tus datos para elegir una tarjeta.'}</p></fieldset>`;
+    return `<fieldset id="financing-link-box" class="card full-span"><legend>Control Tarjetas</legend><label><input type="checkbox" name="linkCard" ${link?'checked':''}> Registrar también en Control Tarjetas</label><div id="financing-link-fields"><label class="field">Fecha del consumo<input name="linkedDate" type="date" value="${escapeHtml(link?.date||existing?.receivedDate||todayKey())}"></label><label class="field">Mes de vencimiento de la tarjeta<input name="linkedMonth" type="month" value="${escapeHtml(link?.month||'')}"></label><p class="subtle">Se usa la tarjeta elegida arriba para ambas aplicaciones. Se registra el total a devolver como consumo en 1 pago, clasificado Préstamos. Elegí el mes en que vas a pagar el resumen.</p></div><p class="subtle">Funciona en el mismo dispositivo y navegador. Cada app conserva su respaldo en Drive; abrí Tarjetas para enviar su copia. ${cards.length?'':'Abrí primero Control Tarjetas con tus datos para elegir una tarjeta.'}</p></fieldset>`;
   }
   function linkNotice(f){return f.cardLink?`<section class="card"><b>${escapeHtml(Link.status(localStorage,f))}</b><p class="subtle">${escapeHtml(f.cardLink.card)} · Vencimiento ${escapeHtml(f.cardLink.month)} · ${money(f.totalToRepay)}</p><button type="button" class="secondary-button" data-action="retry-card-link" data-id="${escapeHtml(f.id)}">Comprobar / reintentar</button> <a class="secondary-button" href="/Control-tarjetas/?screen=movements">Abrir Tarjetas</a><p class="subtle">Los pagos se registran por separado en cada app. Esta vinculación registra el consumo, no un segundo ingreso.</p></section>`:'';}
 
@@ -748,6 +748,10 @@
     const existing = financingId ? data.cardFinancings.find(item => item.id === financingId) : null;
     if (financingId && !existing) return;
     const cardOptions = [...new Set([...(data.cards.length ? data.cards : ['Otra']), ...(existing ? [existing.card] : [])])];
+    let linkedCardOptions=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))linkedCardOptions=saved.cards.map(c=>c.name);}catch(_){}
+    if(existing?.cardLink?.card&&!linkedCardOptions.includes(existing.cardLink.card))linkedCardOptions.push(existing.cardLink.card);
+    const cardKey=name=>String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+
     const interestType = existing?.interestType || 'amount';
     const interestValue = existing ? (existing.interestValue ?? existing.charges ?? 0) : 0;
     const monthly = F.isMonthly(existing);
@@ -808,7 +812,15 @@
       else {value.inputMode=type.value==='percent'?'decimal':'numeric';value.toggleAttribute('data-money-input',type.value==='amount');}
       const label=form.querySelector('#financing-interest-label');label.textContent=monthly?'Tasa mensual (%)':'Intereses / cargos';label.htmlFor=monthly?'financing-interest-value':'financing-interest-type';preview();
     };
-    const linkFields=()=>{const single=mode.value==='single';const checked=single&&form.elements.linkCard.checked;form.querySelector('#financing-link-box').hidden=!single;form.elements.linkCard.disabled=!single;form.querySelector('#financing-link-fields').hidden=!checked;['linkedCard','linkedDate','linkedMonth'].forEach(name=>{form.elements[name].disabled=!checked;form.elements[name].required=checked;});};
+    let initialCardSelection=true;
+    const linkFields=()=>{const single=mode.value==='single';const checked=single&&form.elements.linkCard.checked;
+      const picker=form.elements.card,current=initialCardSelection&&existing?.cardLink?existing.cardLink.card:picker.value;initialCardSelection=false;
+      const names=checked?linkedCardOptions:[...new Set([...cardOptions,...(current?[current]:[])])];
+      const matches=names.filter(name=>cardKey(name)===cardKey(current));
+      const selected=names.includes(current)?current:matches.length===1?matches[0]:'';
+      picker.innerHTML=(checked?'<option value="">Elegí una tarjeta</option>':'')+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');picker.value=selected;
+      form.querySelector('#financing-link-box').hidden=!single;form.elements.linkCard.disabled=!single;form.querySelector('#financing-link-fields').hidden=!checked;
+      ['linkedDate','linkedMonth'].forEach(name=>{form.elements[name].disabled=!checked;form.elements[name].required=checked;});};
     form.elements.linkCard.addEventListener('change',linkFields);
     mode.addEventListener('change',linkFields);linkFields();
     mode.addEventListener('change',modeFields);
@@ -852,7 +864,7 @@
     if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(interestValue) || interestValue < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto, los intereses y las fechas de la financiación.'); return; }
     if (existing && F.isMonthly(existing) && existing.paid > 0 && !confirm('Se cambiará esta financiación a cargos únicos y se conservarán sus pagos. ¿Continuar?')) return;
     if (existing && existing.paid > roundMoney(receivedAmount + charges) + 0.005) { showToast('El total a devolver no puede ser menor que los pagos ya registrados.'); return; }
-    const cardLink=values.get('linkCard')==='on'?{version:1,card:String(values.get('linkedCard')||''),date:String(values.get('linkedDate')||''),month:String(values.get('linkedMonth')||'')}:null;
+    const cardLink=values.get('linkCard')==='on'?{version:1,card:String(values.get('card')||''),date:String(values.get('linkedDate')||''),month:String(values.get('linkedMonth')||'')}:null;
     if(cardLink&&!Link.validLink(cardLink)){showToast('Elegí la tarjeta, la fecha del consumo y el mes de vencimiento.');return;}
     if(existing?.cardLink&&!cardLink&&!confirm('¿Quitar también el consumo vinculado de Control Tarjetas? La financiación seguirá en Préstamos.'))return;
     if(cardLink&&!existing?.cardLink){let target;try{target=JSON.parse(localStorage.getItem(Link.TARGET));}catch(_){}if(Link.validCards(target)&&target.onePayments.some(row=>!Link.linked(row)&&row.card===cardLink.card&&row.month===cardLink.month&&row.date===cardLink.date&&Math.abs(Number(row.amount)-roundMoney(receivedAmount+charges))<0.005)&&!confirm('Ya hay un consumo manual con la misma tarjeta, fecha, vencimiento e importe. Para evitar duplicarlo, cancelá y revisalo primero. ¿Crear otro consumo igualmente?'))return;}
