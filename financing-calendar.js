@@ -14,7 +14,7 @@
     let capacity=cents(row.paid),prior=Math.min(capacity,legacy);capacity-=prior;legacy-=prior;const applied=[];
     for(const p of actual){const used=Math.min(capacity,p.left);if(used){applied.push({id:p.id,date:p.date,amount:used/100});p.left-=used;capacity-=used;}if(!capacity)break;}
     const remaining=cents(row.remaining),paid=cents(row.paid);
-    events.push({id:model.isMonthly(f)?`${f.id}::${row.number}`:f.id,kind:'card-payment',date:row.date,amount:remaining?remaining/100:cents(row.amount)/100,originalAmount:cents(row.amount)/100,paidAmount:paid/100,remaining:remaining/100,status:remaining===0?'Pagada':paid>0?'Parcial':'Pendiente',label:model.isMonthly(f)?`Pago de financiación · mes ${row.number}`:'Pago de tarjeta',detail:`${f.card} · ${model.isInstallments(f)?'cuotas normales':model.isMonthly(f)?'interés mensual + capital final':'vencimiento de financiación'}`,paymentDetails:applied,legacyPaid:prior/100});
+    events.push({financingId:f.id,id:model.isMonthly(f)?`${f.id}::${row.number}`:f.id,kind:'card-payment',date:row.date,amount:remaining?remaining/100:cents(row.amount)/100,originalAmount:cents(row.amount)/100,paidAmount:paid/100,remaining:remaining/100,status:remaining===0?'Pagada':paid>0?'Parcial':'Pendiente',label:model.isMonthly(f)?`Pago de financiación · mes ${row.number}`:'Pago de tarjeta',detail:`${f.card} · ${model.isInstallments(f)?'cuotas normales':model.isMonthly(f)?'interés mensual + capital final':'vencimiento de financiación'}`,paymentDetails:applied,legacyPaid:prior/100});
    }
   }
   return {events,coveredFinancingIds};
