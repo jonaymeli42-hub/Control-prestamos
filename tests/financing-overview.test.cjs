@@ -11,9 +11,14 @@ test('older unpaid and undated balances remain visible and never get assigned to
  const rows=[single,{...single,id:'old',nextPaymentDate:'2026-09-10',totalToRepay:5000,paid:0},{...single,id:'no-date',nextPaymentDate:'',totalToRepay:15000,paid:0},{...single,id:'bad-date',nextPaymentDate:'2026-02-30',totalToRepay:100,paid:0}];
  const r=build(rows,'2026-10-19',F);assert.equal(r.overdue.length,1);assert.equal(r.undated.length,2);assert.equal(r.months.find(g=>g.month==='2026-10').total,100000);assert.equal(r.total,120100);
 });
-test('paid and not-yet-received financing are excluded, December rolls into January and source data stays unchanged',()=>{
- const source=[{...single,paid:110000},{...bullet,received:false},{...single,id:'year',nextPaymentDate:'2027-01-05'}],snapshot=JSON.stringify(source);
- assert.equal(build(source,'2026-12-19',F).rows.length,1);assert.equal(build(source,'2026-12-19',F).months[0].month,'2027-01');assert.equal(JSON.stringify(source),snapshot);assert.deepEqual(build([],'2026-12-19',F).months,[]);
+test('paid single financing appears in its actual payment month; pending totals remain unchanged',()=>{
+ const source=[{...single,paid:110000,nextPaymentDate:''},{...bullet,received:false},{...single,id:'year',nextPaymentDate:'2027-01-05'}],payments=[{id:'payment',financingId:'single',amount:110000,date:'2026-10-23'}],snapshot=JSON.stringify([source,payments]);
+ const report=build(source,'2026-12-19',F,payments),october=report.months.find(g=>g.month==='2026-10');
+ assert.equal(report.rows.length,2);assert.equal(october.items[0].kind,'payment');assert.equal(october.items[0].paidAmount,110000);assert.equal(october.total,0);assert.equal(report.months.find(g=>g.month==='2027-01').total,100000);assert.equal(JSON.stringify([source,payments]),snapshot);assert.deepEqual(build([],'2026-12-19',F).months,[]);
+});
+test('fully paid monthly dues remain visible by due month and do not inflate what remains to pay',()=>{
+ const paidOctober={...bullet,paid:500000},report=build([paidOctober],'2026-12-19',F),october=report.months.find(g=>g.month==='2026-10');
+ assert.ok(october);assert.equal(october.total,0);assert.equal(october.items.length,1);assert.equal(october.items[0].kind,'due');assert.equal(october.items[0].paidAmount,500000);assert.equal(october.items[0].amount,0);assert.equal(report.total,6000000);
 });
 test('undoing a partial payment restores the correct month and totals keep centavos',()=>{
  const paid=build([installments],'2026-10-19',F),undone=build([{...installments,paid:0}],'2026-10-19',F);
