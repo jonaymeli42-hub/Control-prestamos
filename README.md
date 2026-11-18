@@ -1,5 +1,13 @@
 # Control de préstamos
 
+## Financiaciones propias y cuotas personalizadas
+
+La sección **Financiaciones** guarda por separado las compras que el titular debe pagar; las financiaciones recibidas continúan en su sección actual. Calcula intereses como porcentaje total del capital, distribuye los centavos en el último vencimiento y conserva pagos y cuotas en el respaldo JSON/Drive. Los pagos propios se registran como salidas reales; las obligaciones pendientes descuentan dinero a futuro y aparecen en el calendario.
+
+Se pueden vincular compras financiadas con Control Tarjetas desde el mismo navegador. El vínculo crea un solo registro de gasto en cuotas con importes y fechas explícitos, un ID estable y reintentos idempotentes. Si Tarjetas no está disponible, la financiación queda guardada en Préstamos y permite reintentar desde su detalle. Los registros vinculados se administran desde Préstamos.
+
+En el detalle de un préstamo se pueden añadir cuotas adicionales y editar importes o vencimientos individuales. Las cuotas pagadas y los pagos existentes conservan su historial; al recalcular el plan, los importes personalizados no se reemplazan.
+
 ## Financiación recibida con interés mensual y capital final
 
 En **Financiación → Nueva**, elegí **Interés mensual + capital final (recibida)**.
