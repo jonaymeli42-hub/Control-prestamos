@@ -718,9 +718,12 @@
     const monthPending=sum(selectedRows);
     const renderRows=rows=>rows.map(row=>{
       const fullyPaid=row.amount<=0.005&&row.paidAmount>0;
+      const partiallyPaid=!fullyPaid&&row.paidAmount>0.005;
+      const paymentState=fullyPaid?'paid':partiallyPaid?'partial':'pending';
+      const paymentLabel=fullyPaid?'Pagada':partiallyPaid?'Pago parcial':'Pendiente';
       const paymentHistory=row.paidAmount>0.005?data.cardPayments.filter(payment=>payment.financingId===row.financingId).sort((a,b)=>a.date.localeCompare(b.date)).map(payment=>`<small class="financing-month-payment-history">Pago realizado · ${formatDate(payment.date,{day:'numeric',month:'short',year:'numeric'})} · ${money(payment.amount)}</small>`).join(''):'';
       const details=`${row.number?`Cuota ${row.number} de ${row.count} · `:'Vencimiento · '}${row.date?`Vence ${formatDate(row.date,{day:'numeric',month:'short'})}`:'Sin fecha de pago'}${row.paidAmount>0?` · Pagado ${money(row.paidAmount)}`:''}${fullyPaid?' · Completo':''}`;
-      return `<button type="button" class="card financing-month-row ${fullyPaid?'financing-month-paid':''}" data-action="financing-detail" data-id="${escapeHtml(row.financingId)}"><span class="financing-month-concept"><strong>${escapeHtml(row.label)}</strong>${financingDescriptionPreview(records.find(financing=>financing.id===row.financingId))}<small>${details}</small>${paymentHistory}${row.amount>0&&row.date&&row.date<todayKey()?'<small class="movement-out">Vencimiento pasado</small>':''}</span><span class="financing-month-amount"><b>${fullyPaid?`Pagado ${money(row.paidAmount)}`:`Pendiente ${money(row.amount)}`}</b><small>Ver detalle ›</small></span></button>`;
+      return `<button type="button" class="card financing-month-row ${fullyPaid?'financing-month-paid':partiallyPaid?'financing-month-partial':''}" data-action="financing-detail" data-id="${escapeHtml(row.financingId)}"><span class="financing-month-concept"><strong>${escapeHtml(row.label)}</strong>${financingDescriptionPreview(records.find(financing=>financing.id===row.financingId))}<small>${details}</small><span class="badge ${paymentState} financing-month-status">${paymentLabel}</span>${paymentHistory}${row.amount>0&&row.date&&row.date<todayKey()?'<small class="movement-out">Vencimiento pasado</small>':''}</span><span class="financing-month-amount"><b>${fullyPaid?`Pagado ${money(row.paidAmount)}`:`Pendiente ${money(row.amount)}`}</b><small>Ver detalle ›</small></span></button>`;
     }).join('');
     const renderEntities=rows=>{
       const entities=new Map();
