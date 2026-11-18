@@ -28,3 +28,19 @@ test('extra installments keep separate identity, custom amount and due date',()=
  assert.equal(extra.extra,true);assert.equal(extra.number,1000001);assert.equal(extra.extraIndex,1);assert.equal(extra.amount,112000);assert.equal(extra.customAmount,true);assert.equal(extra.dueDate,'2027-01-31');
  assert.equal(M.balance([{amount:100,paid:25},extra]),112075);
 });
+
+test('manual schedules preserve seven user-entered amounts and dates as receivables',()=>{
+ const rows=Array.from({length:6},(_,i)=>({amount:100000,dueDate:`2027-0${i+1}-15`}));
+ rows.push({amount:125000,dueDate:'2027-07-15'});
+ const schedule=M.manualSchedule(rows,{loanId:'loan-manual',idFactory:(()=>{let n=0;return()=>`manual-${++n}`;})()});
+ assert.equal(schedule.length,7);assert.equal(schedule.reduce((sum,row)=>sum+row.amount,0),725000);assert.deepEqual(schedule.map(row=>row.amount),[100000,100000,100000,100000,100000,100000,125000]);
+ assert.equal(schedule[6].dueDate,'2027-07-15');assert.ok(schedule.every(row=>row.loanId==='loan-manual'&&row.status==='Pendiente'&&row.customAmount&&row.customDate));assert.equal(M.balance(schedule),725000);
+});
+
+test('manual schedules reject invalid amounts, dates, ordering and paid amount reductions',()=>{
+ const make=rows=>M.manualSchedule(rows,{loanId:'loan',idFactory:()=> 'row'});
+ assert.throws(()=>make([{amount:0,dueDate:'2027-01-01'}]),/mayor que cero/);
+ assert.throws(()=>make([{amount:10,dueDate:'invalid'}]),/mayor que cero/);
+ assert.throws(()=>make([{amount:10,dueDate:'2027-02-01'},{amount:10,dueDate:'2027-01-01'}]),/posterior al anterior/);
+ assert.throws(()=>make([{amount:10,paid:11,dueDate:'2027-01-01'}]),/menor a lo ya cobrado/);
+});

@@ -19,7 +19,8 @@
   const VALID_THEMES = ['light', 'dark'];
   const BACKUP_FORMAT = 'control-prestamos-backup';
   const BACKUP_VERSION = 1;
-  const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal'];
+  const MANUAL_LOAN_MODE = 'Cuotas con importes definidos';
+  const LOAN_TYPES = ['1 cuota', 'Cuotas normales', 'Interés mensual + capital final', 'Préstamo corto semanal', MANUAL_LOAN_MODE];
   const HISTORICAL_TOTALS = [
     { id: 'plata-recibida', label: 'Plata recibida', amount: 36756484.70, direction: 'in' },
     { id: 'plata-recibida-prestamos-semanales', label: 'Plata recibida préstamos semanales', amount: 4894500.00, direction: 'in' },
@@ -1197,22 +1198,40 @@
     if (existing?.renewals?.length) { openHistoricalLoanForm(loanId); return; }
     const deliveryDate = existing?.deliveryDate || todayKey();
     const firstDue = existing?.firstDue || addDate(deliveryDate, 0, 1);
+    const loanModes=[...new Set([...data.loanTypes,MANUAL_LOAN_MODE])];
+    const existingManualRows=existing?loanInstallments(existing.id).filter(row=>!row.extra).sort((a,b)=>a.number-b.number):[];
     const body = `<form id="loan-form" data-loan-id="${escapeHtml(loanId)}"><div class="form-grid">
       <div class="field"><label for="loan-code">Código / referencia</label><input id="loan-code" name="code" maxlength="40" value="${escapeHtml(existing?.code || '')}" placeholder="Ej. H80">${existing ? '' : '<span class="field-help" id="loan-code-suggestion">Escribí un prefijo, por ejemplo H, para ver su siguiente número.</span>'}</div>
       <div class="field"><label for="loan-person">Persona</label><input id="loan-person" name="person" value="${escapeHtml(existing?.person || '')}" list="people-list" required maxlength="80" placeholder="Nombre"><datalist id="people-list">${data.people.map(person => `<option value="${escapeHtml(person)}">`).join('')}</datalist></div>
-      <div class="field"><label for="loan-mode">Modalidad</label><select id="loan-mode" name="mode" required>${data.loanTypes.map(type => `<option value="${escapeHtml(type)}" ${type === (existing?.mode || data.loanTypes[0]) ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>
+      <div class="field"><label for="loan-mode">Modalidad</label><select id="loan-mode" name="mode" required>${loanModes.map(type => `<option value="${escapeHtml(type)}" ${type === (existing?.mode || data.loanTypes[0]) ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}</select></div>
       <div class="field"><label for="loan-capital">Capital prestado</label><input id="loan-capital" name="capital" type="text" data-money-input inputmode="numeric" required value="${existing ? formatIntegerInput(existing.capital) : ''}" placeholder="Ej. 100.000"></div>
-      <div class="field"><label for="loan-rate">Tasa (%)</label><input id="loan-rate" name="rate" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeHtml(existing?.rate ?? 15)}" required></div>
+      <div class="field" id="loan-rate-field"><label for="loan-rate">Tasa (%)</label><input id="loan-rate" name="rate" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeHtml(existing?.rate ?? 15)}" required></div>
       <div class="field"><label for="loan-count">Cantidad de cuotas</label><input id="loan-count" name="count" type="number" min="1" max="240" step="1" value="${escapeHtml(existing?.count || 1)}" required></div>
       <div class="field"><label for="loan-delivery-date">Fecha de entrega</label><input id="loan-delivery-date" name="deliveryDate" type="date" value="${escapeHtml(deliveryDate)}" required><span class="field-help">Una fecha futura deja el préstamo programado.</span></div>
-      <div class="field"><label for="loan-first-due">Primer vencimiento</label><input id="loan-first-due" name="firstDue" type="date" value="${escapeHtml(firstDue)}" required></div>
+      <div class="field" id="loan-first-due-field"><label for="loan-first-due">Primer vencimiento</label><input id="loan-first-due" name="firstDue" type="date" value="${escapeHtml(firstDue)}" required></div><div class="field full-span" id="loan-manual-installments-field" hidden><p class="field-help">Ingresá el importe en pesos y el vencimiento de cada cuota. No se calcula tasa. El total de las cuotas puede diferir del capital prestado.</p><div id="loan-manual-installments"></div><p id="loan-manual-total" class="field-help"></p></div>
       <div class="field full-span historical-toggle"><label for="loan-historical"><input id="loan-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Préstamo histórico</label><span class="field-help">No descuenta el capital del dinero actual ni genera un movimiento de entrega. Los pagos y cuotas existentes se conservan.</span></div>
       ${existing ? '' : `<div class="field full-span" id="loan-historical-paid-field" hidden><label for="loan-historical-paid-count">Cuotas ya pagadas antes de usar la aplicación</label><input id="loan-historical-paid-count" name="historicalPaidCount" type="number" min="0" max="240" step="1" value="0" disabled><span class="field-help">Se marcarán como históricas las primeras cuotas del cronograma.</span></div>`}
       <div class="field full-span"><label for="loan-notes">Descripción</label><textarea id="loan-notes" name="notes" maxlength="1000" placeholder="Detalle opcional">${escapeHtml(existing?.notes || '')}</textarea></div>
-      </div><p class="field-help">En préstamo corto semanal, la tasa es mensual: se prorratea por los días desde la entrega hasta el último vencimiento, usando un mes de 4 semanas (28 días). Al guardar un préstamo corto anterior se recalculan sus cuotas, conservando los cobros. En cuotas normales, la tasa es mensual y se calcula por la cantidad de meses. En interés mensual + capital final se cobra el interés mensual y el capital al final.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar préstamo'}</button></div></form>`;
+      </div><p class="field-help">En cuotas con importes definidos, cada vencimiento e importe se ingresan manualmente y el total programado suma a Dinero a futuro. En préstamo corto semanal, la tasa es mensual: se prorratea por los días desde la entrega hasta el último vencimiento, usando un mes de 4 semanas (28 días). Al guardar un préstamo corto anterior se recalculan sus cuotas, conservando los cobros. En cuotas normales, la tasa es mensual y se calcula por la cantidad de meses. En interés mensual + capital final se cobra el interés mensual y el capital al final.</p><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar préstamo'}</button></div></form>`;
     openModal(existing ? `Editar préstamo ${existing.code}` : 'Agregar préstamo', existing ? existing.person : 'Completá los datos y generaremos las cuotas.', body);
     const form = modalRoot.querySelector('#loan-form');
     form.addEventListener('submit', saveLoan);
+    const manualField=form.querySelector('#loan-manual-installments-field'),manualRowsRoot=form.querySelector('#loan-manual-installments'),rateField=form.querySelector('#loan-rate-field'),rateInput=form.elements.rate,firstDueField=form.querySelector('#loan-first-due-field'),firstDueInput=form.elements.firstDue;
+    const updateManualTotal=()=>{const total=[...manualRowsRoot.querySelectorAll('[data-manual-amount]')].reduce((sum,input)=>sum+(Number(input.value)||0),0);form.querySelector('#loan-manual-total').textContent='Total de cuotas: '+money(total);};
+    const renderManualRows=()=>{
+      const current=[...manualRowsRoot.querySelectorAll('[data-manual-installment-row]')].map(row=>({amount:row.querySelector('[data-manual-amount]').value,dueDate:row.querySelector('[data-manual-date]').value}));
+      const count=Math.max(1,Math.min(240,Number(form.elements.count.value)||1));
+      manualRowsRoot.innerHTML=Array.from({length:count},(_,index)=>{
+        const old=existingManualRows[index],prior=current[index],amount=prior?.amount??(old?String(old.amount):''),dueDate=prior?.dueDate||old?.dueDate||addDate(firstDueInput.value||deliveryDate,0,index),locked=Number(old?.paid)>0.005;
+        return '<div class="manual-installment-row" data-manual-installment-row><strong>Cuota '+(index+1)+'</strong><label class="field">Importe ($)<input type="number" min="0.01" step="0.01" inputmode="decimal" data-manual-amount value="'+escapeHtml(amount)+'" required '+(locked?'readonly':'')+'></label><label class="field">Vencimiento<input type="date" data-manual-date value="'+escapeHtml(dueDate)+'" required '+(locked?'readonly':'')+'></label>'+(locked?'<small>Pagada parcialmente o completa; se conserva su historial.</small>':'')+'</div>';
+      }).join('');
+      updateManualTotal();
+    };
+    const updateLoanMode=()=>{const manual=form.elements.mode.value===MANUAL_LOAN_MODE;manualField.hidden=!manual;rateField.hidden=manual;rateInput.disabled=manual;rateInput.required=!manual;if(manual)rateInput.value='0';firstDueField.hidden=manual;firstDueInput.disabled=manual;firstDueInput.required=!manual;renderManualRows();manualRowsRoot.querySelectorAll('input').forEach(input=>{input.disabled=!manual;});};
+    form.elements.mode.addEventListener('change',updateLoanMode);
+    form.elements.count.addEventListener('input',renderManualRows);
+    manualRowsRoot.addEventListener('input',updateManualTotal);
+    updateLoanMode();
     if (!existing) {
       const codeInput = form.elements.code;
       const suggestion = form.querySelector('#loan-code-suggestion');
@@ -1465,6 +1484,22 @@
     return { rows: updated };
   }
 
+  function reconcileManualInstallments(loan,nextLoan,inputRows){
+    const oldRows=loanInstallments(loan.id).filter(row=>!row.extra),extras=loanInstallments(loan.id).filter(row=>row.extra),byNumber=new Map();
+    oldRows.forEach(row=>{if(byNumber.has(row.number))throw Error('El préstamo tiene números de cuota repetidos.');byNumber.set(row.number,row);});
+    const count=inputRows.length;
+    for(const old of oldRows.filter(row=>row.number>count))if(Number(old.paid)>0.005||data.collections.some(payment=>payment.installmentId===old.id)||(old.payments||[]).length)return {error:'No se puede quitar una cuota que tiene pagos registrados.'};
+    for(let index=0;index<inputRows.length;index++){
+      const old=byNumber.get(index+1),proposed=inputRows[index];
+      if(old&&Number(old.paid)>0.005&&(Number(old.amount)!==Number(proposed.amount)||old.dueDate!==proposed.dueDate))return {error:'Las cuotas con pagos conservan su importe y vencimiento.'};
+      if(old&&Number(proposed.amount)+0.005<Number(old.paid||0))return {error:'El importe de una cuota no puede quedar por debajo de lo ya cobrado.'};
+    }
+    let updated;try{updated=LI.manualSchedule(inputRows.map((row,index)=>{const old=byNumber.get(index+1);return {...old,...row,id:old?.id,paid:Number(old?.paid)||0,paidBeforeApp:Number(old?.paidBeforeApp)||0,payments:old?.payments||[]};}),{loanId:loan.id,idFactory:id});}catch(error){return {error:error.message};}
+    const retained=new Set(updated.map(row=>row.id));data.installments=data.installments.filter(row=>row.loanId!==loan.id||row.extra||retained.has(row.id));
+    updated.forEach(row=>{const index=data.installments.findIndex(item=>item.id===row.id);if(index>=0)data.installments[index]=row;else data.installments.push(row);});
+    return {rows:updated};
+  }
+
   function saveLoan(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1473,35 +1508,40 @@
     if(existing?.cancelled){showToast('Reactivá el préstamo antes de editarlo.');return;}
     const enteredCapital = parseMoney(form.get('capital'));
     const capital = existing && enteredCapital === Math.round(Number(existing.capital)) ? Number(existing.capital) : enteredCapital;
-    const rate = Number(form.get('rate'));
-    const count = Number(form.get('count'));
     const mode = String(form.get('mode'));
-    const firstDue = String(form.get('firstDue'));
+    const count = Number(form.get('count'));
+    const rate = mode===MANUAL_LOAN_MODE?0:Number(form.get('rate'));
+    const manualInputRows=mode===MANUAL_LOAN_MODE?[...event.currentTarget.querySelectorAll('[data-manual-installment-row]')].map(row=>({amount:Number(row.querySelector('[data-manual-amount]').value),dueDate:String(row.querySelector('[data-manual-date]').value)})):[];
+    const firstDue = mode===MANUAL_LOAN_MODE?(manualInputRows[0]?.dueDate||''):String(form.get('firstDue'));
     const deliveryDate = String(form.get('deliveryDate') || todayKey());
     const historical = event.currentTarget.elements.historical?.checked === true;
     const historicalPaidCount = historical && !existing ? Number(form.get('historicalPaidCount')) : Number(existing?.historicalPaidCount) || 0;
     const scheduleCount = mode === '1 cuota' ? 1 : count;
-    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate) || (mode === 'Préstamo corto semanal' && firstDue <= deliveryDate)) {
+    if (!Number.isFinite(capital) || capital <= 0 || !Number.isFinite(rate) || rate < 0 || !Number.isInteger(count) || count < 1 || count > 240 || !parseDate(firstDue) || !parseDate(deliveryDate) || (mode === 'Préstamo corto semanal' && firstDue <= deliveryDate) || (mode===MANUAL_LOAN_MODE&&manualInputRows.length!==scheduleCount)) {
       showToast('Revisá capital, tasa, cuotas y vencimiento.'); return;
     }
     if (historical && (!Number.isInteger(historicalPaidCount) || historicalPaidCount < 0 || historicalPaidCount > scheduleCount)) {
       showToast(`Las cuotas históricas pagadas deben estar entre 0 y ${scheduleCount}.`); return;
     }
+    if(mode===MANUAL_LOAN_MODE){try{LI.manualSchedule(manualInputRows,{loanId:'validating',idFactory:()=> 'validation'});if(manualInputRows.some(row=>row.dueDate<deliveryDate))throw Error('El vencimiento de una cuota no puede ser anterior a la entrega del préstamo.');}catch(error){showToast(error.message);return;}}
     const person = String(form.get('person')).trim();
     const loan = {
       ...(existing || {}), id: existing?.id || id(), code: String(form.get('code')).trim() || existing?.code || `PRE-${String(data.loans.length + 1).padStart(3, '0')}`,
       person, mode, capital: existing && capital === Number(existing.capital) ? capital : Math.round(capital), rate,
       count: mode === '1 cuota' ? 1 : count, firstDue,
-      firstDueManual: event.currentTarget.elements.firstDue.dataset.manual === 'true',
+      firstDueManual: mode===MANUAL_LOAN_MODE || event.currentTarget.elements.firstDue.dataset.manual === 'true',
       notes: String(form.get('notes')).trim(), createdAt: existing?.createdAt || new Date().toISOString(), deliveryDate,
       disbursed: historical ? true : existing ? (existing.disbursed !== false || deliveryDate <= todayKey()) : deliveryDate <= todayKey(),
       historical, rateRecorded: historical ? true : existing?.rateRecorded || false, historicalPaidCount,
       ...(mode === 'Préstamo corto semanal' ? {shortInterestVersion:1} : {})
     };
     if (existing) {
-      const affectsSchedule = ['capital', 'rate', 'count', 'mode', 'firstDue'].some(key => String(existing[key] ?? '') !== String(loan[key] ?? '')) || (mode === 'Préstamo corto semanal' && (existing.deliveryDate !== deliveryDate || existing.shortInterestVersion !== 1));
+      if(existing.mode===MANUAL_LOAN_MODE&&mode!==MANUAL_LOAN_MODE){showToast('Este préstamo usa importes definidos cuota por cuota. Conservá esa modalidad al editarlo.');return;}
+      const oldManualRows=mode===MANUAL_LOAN_MODE?loanInstallments(existing.id).filter(row=>!row.extra).sort((a,b)=>a.number-b.number):[];
+      const manualChanged=mode===MANUAL_LOAN_MODE&&(oldManualRows.length!==manualInputRows.length||manualInputRows.some((row,index)=>Number(oldManualRows[index]?.amount)!==Number(row.amount)||oldManualRows[index]?.dueDate!==row.dueDate));
+      const affectsSchedule = ['capital', 'rate', 'count', 'mode', 'firstDue'].some(key => String(existing[key] ?? '') !== String(loan[key] ?? '')) || (mode === 'Préstamo corto semanal' && (existing.deliveryDate !== deliveryDate || existing.shortInterestVersion !== 1)) || manualChanged;
       if (affectsSchedule) {
-        const result = reconcileInstallments(existing, loan);
+        const result = mode===MANUAL_LOAN_MODE?reconcileManualInstallments(existing,loan,manualInputRows):reconcileInstallments(existing, loan);
         if (result.error) { showToast(result.error); return; }
       }
       Object.assign(existing, loan);
@@ -1509,7 +1549,7 @@
       persist(); closeModal(); page = 'loans'; render(); showToast('Préstamo actualizado; los pagos existentes se conservaron.');
       return;
     }
-    const schedule = calculateSchedule({ capital: loan.capital, rate, count: loan.count, mode, firstDue, deliveryDate }).map((item, index) => ({
+    const schedule = (mode===MANUAL_LOAN_MODE?LI.manualSchedule(manualInputRows,{loanId:loan.id,idFactory:id}):calculateSchedule({ capital: loan.capital, rate, count: loan.count, mode, firstDue, deliveryDate })).map((item, index) => ({
       ...item,
       loanId: loan.id,
       ...(historical && index < historicalPaidCount ? { paid: item.amount, paidBeforeApp: item.amount, status: 'Pagado' } : {})
@@ -1594,7 +1634,7 @@
     const renewalButton=window.LoanRenewal.eligible(loan,totals.installments)?`<button class="secondary-button full" style="margin-bottom:14px" data-action="renew-loan" data-id="${escapeHtml(loan.id)}">Renovar préstamo</button>`:'';
     const renewalHistory=Array.isArray(loan.renewals)&&loan.renewals.length?`<section class="section"><h3>Historial de renovaciones</h3><div class="list">${loan.renewals.map(r=>`<article class="card"><strong>${formatDate(r.previousDueDate)} → ${formatDate(r.newDueDate)}</strong><div class="kv-list"><div class="kv"><span>Saldo anterior sin cobrar</span><b>${money(r.previousBalance)}</b></div><div class="kv"><span>Nuevo interés acordado</span><b>${money(r.addedInterest)}</b></div><div class="kv"><span>Saldo al renovar</span><b>${money(r.newBalance)}</b></div></div>${r.note?`<p class="subtle">${escapeHtml(r.note)}</p>`:''}</article>`).join('')}</div></section>`:'';
     const duplicateWarning = repeatedNumbers.length ? `<div class="alert">Se detectaron cuotas repetidas (${repeatedNumbers.join(', ')}). No se fusionaron ni eliminaron porque pueden tener pagos vinculados. Revisá el historial antes de recalcular.</div>` : '';
-    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${loan.cancelled?'<div class="alert">Préstamo anulado. Se conservan sus importes, cuotas y cobros, pero no cuentan en el saldo, la proyección ni los avisos. Reactivalo para volver a incluirlo.</div>':''}${renewalButton}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${!loan.historical || loan.rateRecorded ? `<div class="kv"><span>${loan.historical || loan.renewals?.length ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${renewalHistory}${history}`);
+    openModal(`Préstamo ${loan.code}`, loan.person, `${toolbar}${loan.cancelled?'<div class="alert">Préstamo anulado. Se conservan sus importes, cuotas y cobros, pero no cuentan en el saldo, la proyección ni los avisos. Reactivalo para volver a incluirlo.</div>':''}${renewalButton}${duplicateWarning}<div class="card kv-list"><div class="kv"><span>Modalidad</span><b>${escapeHtml(loan.mode)}</b></div><div class="kv"><span>Capital prestado</span><b>${money(loan.capital)}</b></div>${loan.mode!==MANUAL_LOAN_MODE&&(!loan.historical || loan.rateRecorded) ? `<div class="kv"><span>${loan.historical || loan.renewals?.length ? 'Interés / tasa original' : 'Tasa'}</span><b>${escapeHtml(loan.rate)}%</b></div>` : ''}<div class="kv"><span>Cantidad de cuotas</span><b>${escapeHtml(loan.count || totals.installments.length)}</b></div><div class="kv"><span>Fecha de entrega</span><b>${formatDate(loan.deliveryDate)}</b></div>${loan.notes ? `<div class="kv"><span>Descripción</span><b>${escapeHtml(loan.notes)}</b></div>` : ''}<div class="kv"><span>Total a recibir</span><b>${money(totals.total)}</b></div><div class="kv"><span>Cobrado</span><b>${money(totals.paid)}</b></div><div class="kv"><span>Saldo</span><b>${money(totals.balance)}</b></div><div class="kv"><span>Estado</span>${badge(totals.status)}</div><div class="kv"><span>Cuotas cobradas / pendientes</span><b>${paidCount} / ${pendingCount}</b></div>${nextInstallment ? `<div class="kv"><span>Próxima cuota</span><b>${nextInstallment.number} de ${loan.count || totals.installments.length} · ${formatDate(nextInstallment.dueDate)} · ${money(dueLeft(nextInstallment))}</b></div>` : ''}</div><div class="progress"><span style="width:${totals.progress}%"></span></div><p class="progress-meta">${paidCount} de ${totals.installments.length} cuotas · ${money(totals.paid)} de ${money(totals.total)} cobrados</p><section class="section"><div class="section-head"><h3>Cuotas</h3></div><div class="installment-table">${installments}</div></section>${renewalHistory}${history}`);
   }
 
   function toggleLoanCancelled(loanId) {
