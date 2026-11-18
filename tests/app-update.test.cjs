@@ -20,7 +20,7 @@ test('worker revalidates old script URLs and updates their offline copy', async 
     open: async () => ({ put: async (request, response) => { cached = [request.url, await response.text()]; } })
   });
   let result;
-  const request = new Request(root + 'app.js?v=loan-cancellation-1');
+  const request = new Request(root + 'app.js?v=manual-loan-1');
   listeners.fetch({ request, respondWith: promise => result = promise });
   assert.equal(await (await result).text(), 'updated editing code');
   await new Promise(resolve => setImmediate(resolve));
