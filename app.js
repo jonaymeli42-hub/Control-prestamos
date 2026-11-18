@@ -706,21 +706,44 @@
     const monthName=month=>formatDate(month+'-01',{month:'long'});
     const monthLabel=month=>formatDate(month+'-01',{month:'long',year:'numeric'});
     const group=overview.months.find(item=>item.month===financingMonth)||{items:[],total:0};
+    const selectedRows=group.items.filter(row=>row.kind==='due');
+    const includedIds=new Set(selectedRows.map(row=>row.financingId));
+    records.filter(financing=>financing.received!==false&&!F.isMonthly(financing)&&financingBalance(financing)<=0.005&&financing.nextPaymentDate?.slice(0,7)===financingMonth&&!includedIds.has(financing.id)).forEach(financing=>selectedRows.push({kind:'due',financingId:financing.id,label:financing.card||'Financiación',date:financing.nextPaymentDate,number:null,count:null,amount:0,originalAmount:Number(financing.totalToRepay)||0,paidAmount:Number(financing.paid)||0}));
     const older=overview.rows.filter(row=>row.kind==='due'&&row.amount>0&&row.date&&row.date.slice(0,7)<financingMonth);
-    const sum=rows=>roundMoney(rows.reduce((n,row)=>n+row.amount,0));
+    const sum=rows=>roundMoney(rows.reduce((n,row)=>n+Number(row.amount||0),0));
     const personIds=new Set(records.filter(f=>F.isMonthly(f)).map(f=>f.id));
     const split=rows=>({cards:rows.filter(row=>!personIds.has(row.financingId)),people:rows.filter(row=>personIds.has(row.financingId))});
-    const selectedGroups=split(group.items);
-    const renderRows=rows=>rows.map(row=>{const payment=row.kind==='payment',fullyPaid=!payment&&row.amount<=0.005&&row.paidAmount>0,details=payment?`Pago realizado · ${formatDate(row.date,{day:'numeric',month:'short',year:'numeric'})}`:`${row.number?`Cuota ${row.number} de ${row.count} · `:'Saldo pendiente · '}${row.date?`Vence ${formatDate(row.date,{day:'numeric',month:'short'})}`:'Sin fecha de pago'}${row.paidAmount>0?` · Pagado ${money(row.paidAmount)}`:''}${fullyPaid?' · Completo':''}`;return `<button type="button" class="card financing-month-row ${payment||fullyPaid?'financing-month-paid':''}" data-action="financing-detail" data-id="${escapeHtml(row.financingId)}"><span class="financing-month-concept"><strong>${escapeHtml(row.label)}</strong>${financingDescriptionPreview(records.find(f=>f.id===row.financingId))}<small>${details}</small>${payment?'<small class="badge paid">Pagado</small>':row.amount>0&&row.date&&row.date<todayKey()?'<small class="movement-out">Vencimiento pasado</small>':''}</span><span class="financing-month-amount"><b>${payment?`Pagado ${money(row.paidAmount)}`:fullyPaid?`Pagado ${money(row.paidAmount)}`:money(row.amount)}</b><small>Ver detalle ›</small></span></button>`;}).join('');
-    const renderEntities=rows=>{const entities=new Map();rows.forEach(row=>{const key=normalizedName(row.label);if(!entities.has(key))entities.set(key,{label:row.label,rows:[]});entities.get(key).rows.push(row);});return [...entities.values()].map(entity=>{const financingRecords=[...new Set(entity.rows.map(row=>row.financingId))].map(id=>records.find(financing=>financing.id===id)).filter(Boolean),original=roundMoney(financingRecords.reduce((total,financing)=>total+Number(financing.totalToRepay||0),0)),pending=roundMoney(financingRecords.reduce((total,financing)=>total+financingBalance(financing),0));return `<section class="financing-entity"><div class="financing-entity-heading"><h4>${escapeHtml(entity.label)}</h4><span class="financing-entity-totals"><span><small>Total original</small><b>${money(original)}</b></span><span><small>Pendiente actual</small><b>${money(pending)}</b></span></span></div><div class="list">${renderRows(entity.rows)}</div></section>`;}).join('');};
-    const renderGroups=rows=>{const groups=split(rows);return [['cards','Tarjetas'],['people','Personas']].map(([key,label])=>`<section class="financing-month-group" data-financing-group="${key}"><div class="financing-group-heading"><h3>${label}</h3><b>${money(sum(groups[key]))}</b></div><div class="list">${groups[key].length?renderEntities(groups[key]):`<p class="subtle">Sin pagos ni vencimientos de ${label.toLowerCase()} en este mes.</p>`}</div></section>`).join('');};
-    return `<section class="financing-by-month" aria-label="Pagos y vencimientos de financiación por mes"><div class="financing-month-tabs">${[[current,'Este mes'],[next,'Próximo mes']].map(([month,label])=>`<button type="button" data-action="financing-month" data-month="${month}" aria-pressed="${financingMonth===month}" class="${financingMonth===month?'active':''}"><strong>${label}</strong><span>${monthName(month)}</span></button>`).join('')}</div>
+    const selectedGroups=split(selectedRows);
+    const monthDebt=roundMoney(selectedRows.reduce((total,row)=>total+Number(row.originalAmount||0),0));
+    const monthPending=sum(selectedRows);
+    const renderRows=rows=>rows.map(row=>{
+      const fullyPaid=row.amount<=0.005&&row.paidAmount>0;
+      const paymentHistory=row.paidAmount>0.005?data.cardPayments.filter(payment=>payment.financingId===row.financingId).sort((a,b)=>a.date.localeCompare(b.date)).map(payment=>`<small class="financing-month-payment-history">Pago realizado · ${formatDate(payment.date,{day:'numeric',month:'short',year:'numeric'})} · ${money(payment.amount)}</small>`).join(''):'';
+      const details=`${row.number?`Cuota ${row.number} de ${row.count} · `:'Vencimiento · '}${row.date?`Vence ${formatDate(row.date,{day:'numeric',month:'short'})}`:'Sin fecha de pago'}${row.paidAmount>0?` · Pagado ${money(row.paidAmount)}`:''}${fullyPaid?' · Completo':''}`;
+      return `<button type="button" class="card financing-month-row ${fullyPaid?'financing-month-paid':''}" data-action="financing-detail" data-id="${escapeHtml(row.financingId)}"><span class="financing-month-concept"><strong>${escapeHtml(row.label)}</strong>${financingDescriptionPreview(records.find(financing=>financing.id===row.financingId))}<small>${details}</small>${paymentHistory}${row.amount>0&&row.date&&row.date<todayKey()?'<small class="movement-out">Vencimiento pasado</small>':''}</span><span class="financing-month-amount"><b>${fullyPaid?`Pagado ${money(row.paidAmount)}`:`Pendiente ${money(row.amount)}`}</b><small>Ver detalle ›</small></span></button>`;
+    }).join('');
+    const renderEntities=rows=>{
+      const entities=new Map();
+      rows.forEach(row=>{const key=normalizedName(row.label);if(!entities.has(key))entities.set(key,{label:row.label,rows:[]});entities.get(key).rows.push(row);});
+      return [...entities.values()].map(entity=>{
+        const original=sum(entity.rows.map(row=>({...row,amount:row.originalAmount||0}))),pending=sum(entity.rows);
+        return `<section class="financing-entity"><div class="financing-entity-heading"><h4>${escapeHtml(entity.label)}</h4><span class="financing-entity-totals"><span><small>Deuda original del mes</small><b>${money(original)}</b></span><span><small>Pendiente del mes</small><b>${money(pending)}</b></span></span></div><div class="list">${renderRows(entity.rows)}</div></section>`;
+      }).join('');
+    };
+    const renderGroups=rows=>{
+      const groups=split(rows);
+      return [['cards','Tarjetas'],['people','Personas']].map(([key,label])=>{
+        const debt=sum(groups[key].map(row=>({...row,amount:row.originalAmount||0}))),pending=sum(groups[key]);
+        return `<section class="financing-month-group" data-financing-group="${key}"><div class="financing-group-heading"><h3>${label}</h3><span class="financing-group-month-totals"><span>Deuda ${money(debt)}</span><b>Pendiente ${money(pending)}</b></span></div><div class="list">${groups[key].length?renderEntities(groups[key]):`<p class="subtle">Sin vencimientos de ${label.toLowerCase()} en este mes.</p>`}</div></section>`;
+      }).join('');
+    };
+    return `<section class="financing-by-month" aria-label="Vencimientos de financiación por mes"><div class="financing-month-tabs">${[[current,'Este mes'],[next,'Próximo mes']].map(([month,label])=>`<button type="button" data-action="financing-month" data-month="${month}" aria-pressed="${financingMonth===month}" class="${financingMonth===month?'active':''}"><strong>${label}</strong><span>${monthName(month)}</span></button>`).join('')}</div>
       <details class="financing-other-month"><summary>Consultar otro mes</summary><label class="field">Mes<input type="month" id="financing-month" value="${escapeHtml(financingMonth)}"></label></details>
-      <article class="card financing-month-summary"><span>Te queda pagar en ${monthLabel(financingMonth)}</span><small class="financing-general-label">Total general</small><strong data-financing-total="general">${money(group.total)}</strong><div class="financing-month-breakdown"><div><span>Total tarjetas</span><b data-financing-total="cards">${money(sum(selectedGroups.cards))}</b></div><div><span>Total personas</span><b data-financing-total="people">${money(sum(selectedGroups.people))}</b></div></div></article>
-      <div class="financing-month-list">${renderGroups(group.items)}</div>
+      <article class="card financing-month-summary"><span>Deuda original de ${monthLabel(financingMonth)}</span><strong class="financing-month-original">${money(monthDebt)}</strong><small class="financing-general-label">Te queda pagar en ${monthLabel(financingMonth)}</small><strong data-financing-total="general">${money(monthPending)}</strong><div class="financing-month-breakdown"><div><span>Pendiente de tarjetas</span><b data-financing-total="cards">${money(sum(selectedGroups.cards))}</b></div><div><span>Pendiente de personas</span><b data-financing-total="people">${money(sum(selectedGroups.people))}</b></div></div></article>
+      <div class="financing-month-list">${renderGroups(selectedRows)}</div>
       ${older.length?`<details class="card financing-month-extra"><summary>Meses anteriores pendientes · ${money(sum(older))}</summary><p class="subtle">No están incluidos en el total del mes seleccionado.</p><div>${renderGroups(older)}</div></details>`:''}
       ${overview.undated.length?`<details class="card financing-month-extra"><summary>Sin fecha de pago · ${money(sum(overview.undated))}</summary><p class="subtle">Definí una fecha en el detalle de cada financiación para ubicarla en un mes.</p><div>${renderGroups(overview.undated)}</div></details>`:''}
-      <p class="subtle financing-month-note">Se muestran los vencimientos pendientes y los pagos realizados registrados en el mes. Los totales reflejan solo lo que queda por pagar.</p>
+      <p class="subtle financing-month-note">Cada mes muestra sus propios vencimientos, agrupados por tarjeta y persona. Los pagos anticipados aparecen dentro de la financiación con su fecha real y no cambian el mes del vencimiento. Los totales distinguen la deuda original del saldo pendiente.</p>
     </section>`;
   }
 
