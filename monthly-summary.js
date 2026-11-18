@@ -32,6 +32,11 @@
     const payments=paymentsByFinancing.get(financing.id)||[],paidByDate=payments.filter(row=>validDate(row.date)&&row.date<=endDate).reduce((sum,row)=>sum+cents(row.amount),0),paymentTotal=payments.reduce((sum,row)=>sum+cents(row.amount),0),legacyPaid=cents(financing.legacyPaid??Math.max(0,(Number(financing.paid)||0)-paymentTotal));
     debtCents+=Math.max(0,cents(financing.totalToRepay)-Math.min(cents(financing.totalToRepay),legacyPaid+paidByDate));
    }
+   for(const financing of data.ownFinancings||[]){
+    if(!validDate(financing.purchaseDate)||financing.purchaseDate>endDate)continue;
+    const total=(financing.installments||[]).reduce((sum,row)=>sum+cents(row.amount),0),paid=(financing.installments||[]).flatMap(row=>row.payments||[]).filter(row=>row.status!=='Anulado'&&validDate(row.date)&&row.date<=endDate).reduce((sum,row)=>sum+cents(row.amount),0);
+    debtCents+=Math.max(0,total-Math.min(total,paid));
+   }
    const salaryPending=cents(salary.reconcile(movements).pending),availableCents=cashCents+receivableCents+salaryPending-debtCents;
    periods.push({month:`${year}-${String(month+1).padStart(2,'0')}`,label:new Intl.DateTimeFormat('es-AR',{month:'long',year:'numeric'}).format(start).replace(/^./,letter=>letter.toLocaleUpperCase('es-AR')),current:cashCents/100,receivable:receivableCents/100,salaryPending:salaryPending/100,obligations:debtCents/100,available:availableCents/100});
   }

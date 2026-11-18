@@ -9,3 +9,7 @@ test('previous projection reconstructs a month-end from dated activity, and igno
  const periods=projectionHistory(data,'2026-11-02',LC,S);assert.equal(periods.length,1);assert.equal(periods[0].month,'2026-10');assert.equal(periods[0].current,965);assert.equal(periods[0].receivable,270);assert.equal(periods[0].obligations,55);assert.equal(periods[0].available,1180);assert.equal(JSON.stringify(data),before);
 });
 test('no historical projection is invented without dated records before this month',()=>{assert.deepEqual(projectionHistory({settings:{initialBalance:500},movements:[],futureHistory:[]},'2026-11-02',LC,S),[]);});
+test('own financing receipt raises past cash and its outstanding installments offset it in future money',()=>{
+ const data={settings:{initialBalance:0},loans:[],installments:[],collections:[],cardFinancings:[],cardPayments:[],movements:[{id:'receipt',ownFinancingId:'f',type:'Financiación propia recibida',direction:'in',date:'2026-10-05',amount:571000,status:'Realizado'}],ownFinancings:[{id:'f',purchaseDate:'2026-10-05',capital:571000,installments:[{amount:571000,paid:0,payments:[]}]}],futureHistory:[]};
+ const periods=projectionHistory(data,'2026-11-02',LC,S);assert.equal(periods.length,1);assert.equal(periods[0].current,571000);assert.equal(periods[0].obligations,571000);assert.equal(periods[0].available,0);
+});

@@ -23,6 +23,20 @@
     if (!validDate(financing.purchaseDate) || !validDate(financing.firstDueDate) || !Array.isArray(financing.installments) || financing.installments.length !== financing.count) throw Error('La financiación no tiene un cronograma válido.');
     return financing.installments.map((item, index) => ({ id: item.id || ids(), financingId: financing.id, number: index + 1, amount: round(Number(item.amount)), dueDate: item.dueDate, paid: round(Number(item.paid || 0)), status: item.status || 'Pendiente', payments: Array.isArray(item.payments) ? item.payments : [], customAmount: item.customAmount === true, customDate: item.customDate === true }));
   }
-  root.OwnFinancingModel = { round, cents, validDate, calculate, dateAfterMonths, schedule };
+  function cashReceipt(financing, movementId, existing = {}) {
+    const capital = round(Number(financing?.capital));
+    if (!financing || typeof financing.id !== 'string' || !financing.id || !movementId || !validDate(financing.purchaseDate) || !Number.isFinite(capital) || capital <= 0) throw Error('No se puede registrar el capital de esta financiación.');
+    return { ...existing, id: movementId, createdAt: existing.createdAt || new Date().toISOString(), date: financing.purchaseDate, scheduledDate: '', type: 'Financiación propia recibida', description: `${financing.card} · ${financing.description} · Capital financiado`, direction: 'in', amount: capital, status: 'Realizado', ownFinancingId: financing.id };
+  }
+  function syncCashReceipt(financing, movements, createIfMissing = false, ids = () => crypto.randomUUID()) {
+    const linked = movements.filter(item => item.ownFinancingId === financing.id && item.type === 'Financiación propia recibida');
+    const existing = linked[0];
+    if (!existing && !createIfMissing) return { movement: null, movements };
+    const movement = cashReceipt(financing, existing?.id || ids(), existing || {});
+    const next = movements.filter(item => !linked.slice(1).includes(item)).map(item => item === existing ? movement : item);
+    if (!existing) next.unshift(movement);
+    return { movement, movements: next };
+  }
+  root.OwnFinancingModel = { round, cents, validDate, calculate, dateAfterMonths, schedule, cashReceipt, syncCashReceipt };
   if (typeof module === 'object' && module.exports) module.exports = root.OwnFinancingModel;
 })(globalThis);
