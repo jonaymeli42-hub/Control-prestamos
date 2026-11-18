@@ -157,6 +157,8 @@
   }
 
   function normalizedName(value) { return String(value ?? '').trim().toLocaleLowerCase('es-AR'); }
+  const {key:cardNameKey,unique:uniqueCardNames}=window.CardOptions;
+  function availableCardNames(preferred=[]) { let linked=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))linked=saved.cards.map(card=>card.name);}catch(_){} return uniqueCardNames([...linked,...data.cards,...preferred]); }
 
   function money(value) {
     return new Intl.NumberFormat(data.settings.locale || 'es-AR', { style: 'currency', currency: data.settings.currency || 'ARS', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(value) || 0);
@@ -797,8 +799,7 @@
 
   function openOwnFinancingForm(financingId='') {
     const existing=financingId?data.ownFinancings.find(row=>row.id===financingId):null;if(financingId&&!existing)return;
-    let linkedCards=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))linkedCards=saved.cards.map(card=>card.name);}catch(_){}
-    const cards=[...new Set([...linkedCards,...data.cards,...(existing?.card?[existing.card]:[])])];
+    const cards=availableCardNames(existing?.card?[existing.card]:[]);
     const defaults=existing||{description:'',capital:'',interestPercent:0,count:3,purchaseDate:todayKey(),firstDueDate:todayKey(),card:cards[0]||'',notes:'',installments:[]};
     const oldRows=existing?ownFinancingRows(existing.id):[];
     const locked=Boolean(existing&&oldRows.some(row=>Number(row.paid)>0.005));
@@ -809,13 +810,15 @@
     form.addEventListener('input',preview);preview();
     form.addEventListener('submit',event=>{event.preventDefault();const values=new FormData(form),capital=Number(values.get('capital')),interestPercent=Number(values.get('interestPercent')),count=Number(values.get('count')),purchaseDate=String(values.get('purchaseDate')),firstDueDate=String(values.get('firstDueDate')),card=String(values.get('card')).trim(),linkEnabled=values.get('linkCard')==='on';let calculated;
       try{calculated=OF.calculate(capital,interestPercent,count);if(!OF.validDate(purchaseDate)||!OF.validDate(firstDueDate)||firstDueDate<purchaseDate||!card)throw Error('Revisá las fechas y el medio de financiación.');}catch(error){showToast(error.message||'Revisá los datos de la financiación.');return;}
+      if(linkEnabled){let target;try{target=JSON.parse(localStorage.getItem(Link.TARGET));}catch(_){}if(!Link.validCards(target)||!target.cards.some(item=>item.name===card)){showToast('Para vincularla, agregá primero esta tarjeta en Control Tarjetas. La financiación puede guardarse sin vincular.');return;}}
       const scheduleChanged=existing&&([existing.capital!==calculated.capital,existing.interestPercent!==interestPercent,existing.count!==count,existing.purchaseDate!==purchaseDate,existing.firstDueDate!==firstDueDate].some(Boolean));
       if(scheduleChanged&&(locked||custom)){showToast('Para cambiar las condiciones del cronograma, primero resolvé los pagos o cuotas personalizadas.');return;}
       if(existing?.cardLink&&!linkEnabled&&!confirm('¿Quitar también las cuotas vinculadas de Control Tarjetas? La financiación seguirá guardada en Préstamos.'))return;
       let installments=oldRows;
       if(!existing||scheduleChanged){installments=calculated.amounts.map((amount,index)=>({id:oldRows[index]?.id||id(),financingId:existing?.id||'',number:index+1,amount,calculatedAmount:amount,customAmount:false,customDate:false,dueDate:OF.dateAfterMonths(firstDueDate,index),paid:0,status:'Pendiente',payments:[]}));}
+      const savedCard=existing?.card&&cardNameKey(existing.card)===cardNameKey(card)?existing.card:card;
       const financing=existing||{id:id(),createdAt:new Date().toISOString(),installments:[]};
-      Object.assign(financing,{description:String(values.get('description')).trim(),capital:calculated.capital,interestPercent,interestAmount:calculated.interest,totalToRepay:roundMoney(installments.reduce((sum,row)=>sum+Number(row.amount),0)),count,purchaseDate,firstDueDate,card,notes:String(values.get('notes')||'').trim(),installments});
+      Object.assign(financing,{description:String(values.get('description')).trim(),capital:calculated.capital,interestPercent,interestAmount:calculated.interest,totalToRepay:roundMoney(installments.reduce((sum,row)=>sum+Number(row.amount),0)),count,purchaseDate,firstDueDate,card:savedCard,notes:String(values.get('notes')||'').trim(),installments});
       financing.installments.forEach((row,index)=>{row.financingId=financing.id;row.number=index+1;});
       if(linkEnabled)financing.cardLink={version:2,card,date:purchaseDate};else if(financing.cardLink){data.cardLinkRemovals=[...new Set([...(data.cardLinkRemovals||[]),financing.id])];delete financing.cardLink;}
       if(!existing)data.ownFinancings.unshift(financing);
@@ -877,12 +880,8 @@
   function openFinancingForm(financingId = '') {
     const existing = financingId ? data.cardFinancings.find(item => item.id === financingId) : null;
     if (financingId && !existing) return;
-    const cardOptions = [...new Set([...(data.cards.length ? data.cards : ['Otra']), ...(existing ? [existing.card] : [])])];
-    let linkedCardOptions=[];try{const saved=JSON.parse(localStorage.getItem(Link.TARGET));if(Link.validCards(saved))linkedCardOptions=saved.cards.map(c=>c.name);}catch(_){}
-    if(existing?.cardLink?.card&&!linkedCardOptions.includes(existing.cardLink.card))linkedCardOptions.push(existing.cardLink.card);
-    const cardKey=name=>String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-
-    const interestType = existing?.interestType || 'amount';
+    const cardOptions = availableCardNames(existing?.card?[existing.card]:[]);
+    const cardKey=cardNameKey;
     const interestValue = existing ? (existing.interestValue ?? existing.charges ?? 0) : 0;
     const monthly = F.isMonthly(existing);
     const body = `<form id="financing-form" data-financing-id="${escapeHtml(financingId)}"><div class="form-grid"><div class="field full-span"><label for="financing-mode">Modalidad</label><select id="financing-mode" name="repaymentMode"><option value="single" ${!monthly?'selected':''}>Financiación de tarjeta / cargos únicos</option><option value="monthly-bullet" ${existing?.repaymentMode==='monthly-bullet'?'selected':''}>Interés mensual + capital final (recibida)</option><option value="installments" ${F.isInstallments(existing)?'selected':''}>Cuotas normales (recibida)</option></select></div><div class="field" id="financing-card-field"><label for="financing-card">Tarjeta</label><select id="financing-card" name="card" required>${cardOptions.map(card => `<option value="${escapeHtml(card)}" ${card === existing?.card ? 'selected' : ''}>${escapeHtml(card)}</option>`).join('')}</select></div><div class="field" id="financing-lender-field"><label for="financing-lender">Persona que me presta</label><input id="financing-lender" name="lender" maxlength="100" value="${escapeHtml(monthly?existing.card:'')}" placeholder="Nombre de tu amigo"></div><div class="field"><label for="financing-date">Fecha en que recibí el dinero</label><input id="financing-date" name="receivedDate" type="date" value="${escapeHtml(existing?.receivedDate || todayKey())}" required></div><div class="field"><label for="financing-amount">Monto recibido</label><input id="financing-amount" name="receivedAmount" type="text" data-money-input inputmode="numeric" value="${existing ? formatIntegerInput(existing.receivedAmount) : ''}" required></div><div class="field"><label for="financing-interest-type" id="financing-interest-label">Intereses / cargos</label><select id="financing-interest-type" name="interestType"><option value="amount" ${interestType === 'amount' ? 'selected' : ''}>Importe ($)</option><option value="percent" ${interestType === 'percent' ? 'selected' : ''}>Porcentaje (%)</option></select><input id="financing-interest-value" name="interestValue" type="text" ${interestType === 'percent' ? 'inputmode="decimal"' : 'data-money-input inputmode="numeric"'} value="${escapeHtml(interestType === 'percent' ? formatInterestPercent(interestValue) : interestValue)}" required><span class="field-help" id="financing-interest-preview"></span></div><div class="field" id="financing-single-date-field"><label for="financing-next-date">Próxima fecha de pago prevista (opcional)</label><input id="financing-next-date" name="nextPaymentDate" type="date" value="${escapeHtml(existing?.nextPaymentDate || '')}"></div><div class="field" id="financing-month-count-field"><label for="financing-month-count">Cantidad de meses</label><input id="financing-month-count" name="monthCount" type="number" min="1" max="240" step="1" value="${monthly?existing.monthCount:1}"></div><div class="field" id="financing-first-due-field"><label for="financing-first-due">Primer vencimiento</label><input id="financing-first-due" name="firstDueDate" type="date" value="${monthly?existing.firstDueDate:F.nextMonthDate(existing?.receivedDate || todayKey())}"></div>${financingLinkFields(existing)}<div class="field full-span"><label for="financing-description">Descripción (opcional)</label><textarea id="financing-description" name="description" maxlength="1000" placeholder="Por ejemplo: para qué recibiste esta financiación o alguna aclaración">${escapeHtml(existing?.description || '')}</textarea></div><div class="field full-span historical-toggle"><label for="financing-historical"><input id="financing-historical" name="historical" type="checkbox" ${existing?.historical ? 'checked' : ''}> Financiación histórica</label><span class="field-help">No suma el dinero recibido al saldo actual; la deuda pendiente sí queda contabilizada.</span></div></div><div class="card kv-list financing-preview"><div class="kv"><span>Intereses / cargos</span><b id="financing-charges-preview">${money(existing?.charges || 0)}</b></div><div class="kv"><span>Total a devolver</span><b id="financing-total-preview">${money(existing?.totalToRepay || 0)}</b></div></div><div id="financing-schedule-preview" class="section"></div><div class="form-actions"><button type="button" class="secondary-button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">${existing ? 'Guardar cambios' : 'Guardar financiación'}</button></div></form>`;
@@ -945,7 +944,7 @@
     let initialCardSelection=true;
     const linkFields=()=>{const single=mode.value==='single';const checked=single&&form.elements.linkCard.checked;
       const picker=form.elements.card,current=initialCardSelection&&existing?.cardLink?existing.cardLink.card:picker.value;initialCardSelection=false;
-      const names=checked?linkedCardOptions:[...new Set([...cardOptions,...(current?[current]:[])])];
+      const names=uniqueCardNames([...cardOptions,...(current?[current]:[])]);
       const matches=names.filter(name=>cardKey(name)===cardKey(current));
       const selected=names.includes(current)?current:matches.length===1?matches[0]:'';
       picker.innerHTML=(checked?'<option value="">Elegí una tarjeta</option>':'')+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');picker.value=selected;
@@ -996,14 +995,14 @@
     if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || !Number.isFinite(interestValue) || interestValue < 0 || !parseDate(receivedDate) || (nextPaymentDate && (!parseDate(nextPaymentDate) || nextPaymentDate < receivedDate))) { showToast('Revisá el monto, los intereses y las fechas de la financiación.'); return; }
     if (existing && F.isMonthly(existing) && existing.paid > 0 && !confirm('Se cambiará esta financiación a cargos únicos y se conservarán sus pagos. ¿Continuar?')) return;
     if (existing && existing.paid > roundMoney(receivedAmount + charges) + 0.005) { showToast('El total a devolver no puede ser menor que los pagos ya registrados.'); return; }
-    const cardLink=values.get('linkCard')==='on'?{version:1,card:String(values.get('card')||''),date:String(values.get('linkedDate')||''),month:String(values.get('linkedMonth')||'')}:null;
-    if(cardLink&&!Link.validLink(cardLink)){showToast('Elegí la tarjeta, la fecha del consumo y el mes de vencimiento.');return;}
-    if(existing?.cardLink&&!cardLink&&!confirm('¿Quitar también el consumo vinculado de Control Tarjetas? La financiación seguirá en Préstamos.'))return;
+    const selectedCard=String(values.get('card')||'');const savedCard=existing?.card&&cardNameKey(existing.card)===cardNameKey(selectedCard)?existing.card:selectedCard;
+    const cardLink=values.get('linkCard')==='on'?{version:1,card:selectedCard,date:String(values.get('linkedDate')||''),month:String(values.get('linkedMonth')||'')}:null;
+    if(cardLink&&!Link.validLink(cardLink)){showToast('Elegí la tarjeta, la fecha del consumo y el mes de vencimiento.');return;}if(cardLink){let target;try{target=JSON.parse(localStorage.getItem(Link.TARGET));}catch(_){}if(!Link.validCards(target)||!target.cards.some(card=>card.name===cardLink.card)){showToast('Para vincularla, agregá primero esta tarjeta en Control Tarjetas. La financiación puede guardarse sin vincular.');return;}}if(existing?.cardLink&&!cardLink&&!confirm('¿Quitar también el consumo vinculado de Control Tarjetas? La financiación seguirá en Préstamos.'))return;
     if(cardLink&&!existing?.cardLink){let target;try{target=JSON.parse(localStorage.getItem(Link.TARGET));}catch(_){}if(Link.validCards(target)&&target.onePayments.some(row=>!Link.linked(row)&&row.card===cardLink.card&&row.month===cardLink.month&&row.date===cardLink.date&&Math.abs(Number(row.amount)-roundMoney(receivedAmount+charges))<0.005)&&!confirm('Ya hay un consumo manual con la misma tarjeta, fecha, vencimiento e importe. Para evitar duplicarlo, cancelá y revisalo primero. ¿Crear otro consumo igualmente?'))return;}
     const before=structuredClone(data);
     const financing = existing || { id: id(), paid: 0, legacyPaid: 0, createdAt: new Date().toISOString(), payments: [] };
     const historical = values.get('historical') === 'on';
-    Object.assign(financing, { repaymentMode:'single', card: String(values.get('card')), description, receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
+    Object.assign(financing, { repaymentMode:'single', card: savedCard, description, receivedDate, receivedAmount, charges, interestType, interestValue, totalToRepay: roundMoney(receivedAmount + charges), nextPaymentDate, historical, received: historical || financing.paid > 0 || receivedDate <= todayKey() });
     if(cardLink)financing.cardLink=cardLink;else if(financing.cardLink){data.cardLinkRemovals=[...new Set([...(data.cardLinkRemovals||[]),financing.id])];delete financing.cardLink;}
     syncFinancingPaid(financing);
     if (!existing) data.cardFinancings.unshift(financing);
